@@ -1,4 +1,4 @@
-# Dependencias
+# Dependencies
 node_modules/
 .pnpm-store/
 
@@ -8,13 +8,12 @@ out/
 dist/
 build/
 
-# Env
+# Environment
 .env
 .env.local
 .env.*.local
 
 # Logs
-logs/
 *.log
 npm-debug.log*
 
@@ -23,36 +22,8 @@ npm-debug.log*
 Thumbs.db
 
 # IDE
-.idea/
 .vscode/
-*.swp
-*.swo
+.idea/
 
 # Docker
 docker-compose.override.yml
-
-# Datos locales (no subir a git)
-postgres_data/
-evolution_data/
-n8n_data/
-qdrant_data/
-redis_data/
-caddy_data/
-caddy_config/
-
-# Uploads
-uploads/
-*.pdf
-*.doc
-*.docx
-*.xls
-*.xlsx
-
-# Testing
-coverage/
-.nyc_output/
-
-# Misc
-*.bak
-*.tmp
-.cache/

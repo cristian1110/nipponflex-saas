@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
 
-export async function GET(request: NextRequest) {
+export const dynamic = 'force-dynamic'
+
+export async function GET() {
   try {
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
@@ -13,6 +15,7 @@ export async function GET(request: NextRequest) {
     )
     return NextResponse.json(campanas)
   } catch (error) {
+    console.error('Error campañas:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
 }
@@ -21,19 +24,54 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
-    if (user.nivel < 3) return NextResponse.json({ error: 'Sin permisos' }, { status: 403 })
 
     const body = await request.json()
-    const { nombre, tipo, canal, mensaje_template, variables, fecha_programada } = body
+    const { nombre, mensaje, contactos_ids } = body
+
+    if (!nombre || !mensaje) {
+      return NextResponse.json({ error: 'Nombre y mensaje requeridos' }, { status: 400 })
+    }
 
     const campana = await queryOne(
-      `INSERT INTO campanas (cliente_id, nombre, tipo, estado, mensaje_template, variables, canal, total_destinatarios, enviados, entregados, leidos, respondidos, fecha_programada)
-       VALUES ($1, $2, $3, 'borrador', $4, $5, $6, 0, 0, 0, 0, 0, $7)
+      `INSERT INTO campanas (cliente_id, nombre, mensaje, total_contactos, estado)
+       VALUES ($1, $2, $3, $4, 'borrador')
        RETURNING *`,
-      [user.cliente_id, nombre, tipo || 'broadcast', mensaje_template, variables ? JSON.stringify(variables) : null, canal || 'whatsapp', fecha_programada]
+      [user.cliente_id, nombre, mensaje, contactos_ids?.length || 0]
     )
+
+    // Agregar contactos a la campaña
+    if (contactos_ids && contactos_ids.length > 0) {
+      for (const contactoId of contactos_ids) {
+        await query(
+          `INSERT INTO campana_contactos (campana_id, contacto_id) VALUES ($1, $2)`,
+          [campana.id, contactoId]
+        )
+      }
+    }
+
     return NextResponse.json(campana, { status: 201 })
   } catch (error) {
+    console.error('Error crear campaña:', error)
+    return NextResponse.json({ error: 'Error interno' }, { status: 500 })
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+    const body = await request.json()
+    const { id, estado } = body
+
+    await query(
+      `UPDATE campanas SET estado = $1, updated_at = NOW() WHERE id = $2 AND cliente_id = $3`,
+      [estado, id, user.cliente_id]
+    )
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('Error actualizar campaña:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
 }
