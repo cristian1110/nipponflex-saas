@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     if (!lead) {
       // Obtener primera etapa del pipeline
       const etapa = await queryOne(
-        `SELECT id FROM etapas_pipeline WHERE cliente_id = $1 ORDER BY orden LIMIT 1`,
+        `SELECT id FROM etapas_crm WHERE cliente_id = $1 ORDER BY orden LIMIT 1`,
         [clienteId]
       )
 

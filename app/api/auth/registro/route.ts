@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
 
     for (const etapa of etapas) {
       await queryOne(
-        `INSERT INTO etapas_pipeline (cliente_id, nombre, color, orden, es_ganado, es_perdido)
+        `INSERT INTO etapas_crm (cliente_id, nombre, color, orden, es_ganado, es_perdido)
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [cliente.id, etapa.nombre, etapa.color, etapa.orden, etapa.es_ganado || false, etapa.es_perdido || false]
       )

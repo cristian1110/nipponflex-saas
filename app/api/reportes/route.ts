@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -24,10 +26,10 @@ export async function GET(request: NextRequest) {
     const metricas = await queryOne(`
       SELECT
         (SELECT COUNT(*) FROM leads WHERE cliente_id = $1 AND created_at >= $2) as "totalLeads",
-        (SELECT COUNT(*) FROM leads l JOIN etapas_pipeline e ON l.etapa_id = e.id WHERE l.cliente_id = $1 AND e.es_ganado = true AND l.created_at >= $2) as "leadsGanados",
-        (SELECT COUNT(*) FROM leads l JOIN etapas_pipeline e ON l.etapa_id = e.id WHERE l.cliente_id = $1 AND e.es_perdido = true AND l.created_at >= $2) as "leadsPerdidos",
-        (SELECT COALESCE(SUM(valor_estimado), 0) FROM leads l JOIN etapas_pipeline e ON l.etapa_id = e.id WHERE l.cliente_id = $1 AND e.es_ganado = true AND l.created_at >= $2) as "valorTotal",
-        (SELECT COUNT(*) FROM mensajes WHERE cliente_id = $1 AND created_at >= $2) as "mensajesTotales",
+        (SELECT COUNT(*) FROM leads l JOIN etapas_crm e ON l.etapa_id = e.id WHERE l.cliente_id = $1 AND e.es_ganado = true AND l.created_at >= $2) as "leadsGanados",
+        (SELECT COUNT(*) FROM leads l JOIN etapas_crm e ON l.etapa_id = e.id WHERE l.cliente_id = $1 AND e.es_perdido = true AND l.created_at >= $2) as "leadsPerdidos",
+        (SELECT COALESCE(SUM(valor_estimado), 0) FROM leads l JOIN etapas_crm e ON l.etapa_id = e.id WHERE l.cliente_id = $1 AND e.es_ganado = true AND l.created_at >= $2) as "valorTotal",
+        (SELECT COUNT(*) FROM historial_conversaciones WHERE cliente_id = $1 AND created_at >= $2) as "mensajesTotales",
         (SELECT COUNT(*) FROM citas WHERE cliente_id = $1 AND estado = 'completada' AND created_at >= $2) as "citasCompletadas"
     `, [user.cliente_id, fechaInicio.toISOString()])
 
@@ -35,12 +37,12 @@ export async function GET(request: NextRequest) {
     const leadsGanados = parseInt(metricas?.leadsGanados || '0')
     const conversionRate = totalLeads > 0 ? (leadsGanados / totalLeads) * 100 : 0
 
-    // Leads por etapa
+    // Leads por etapa - usando pipeline_id en lugar de cuenta_id
     const leadsPorEtapa = await query(`
       SELECT e.nombre as etapa, e.color, COUNT(l.id) as total
-      FROM etapas_pipeline e
+      FROM etapas_crm e
       LEFT JOIN leads l ON l.etapa_id = e.id AND l.created_at >= $2
-      WHERE e.cliente_id = $1
+      WHERE e.pipeline_id IN (SELECT id FROM pipelines WHERE cliente_id = $1)
       GROUP BY e.id, e.nombre, e.color, e.orden
       ORDER BY e.orden
     `, [user.cliente_id, fechaInicio.toISOString()])
@@ -56,7 +58,7 @@ export async function GET(request: NextRequest) {
 
     // Actividad diaria (últimos 14 días)
     const actividadDiaria = await query(`
-      SELECT 
+      SELECT
         d.fecha,
         COALESCE(l.leads, 0) as leads,
         COALESCE(m.mensajes, 0) as mensajes
@@ -70,7 +72,7 @@ export async function GET(request: NextRequest) {
       ) l ON d.fecha = l.fecha
       LEFT JOIN (
         SELECT DATE(created_at) as fecha, COUNT(*) as mensajes
-        FROM mensajes WHERE cliente_id = $1
+        FROM historial_conversaciones WHERE cliente_id = $1
         GROUP BY DATE(created_at)
       ) m ON d.fecha = m.fecha
       ORDER BY d.fecha
@@ -78,7 +80,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       metricas: {
-        ...metricas,
         totalLeads,
         leadsGanados: parseInt(metricas?.leadsGanados || '0'),
         leadsPerdidos: parseInt(metricas?.leadsPerdidos || '0'),
@@ -86,14 +87,14 @@ export async function GET(request: NextRequest) {
         conversionRate,
         mensajesTotales: parseInt(metricas?.mensajesTotales || '0'),
         citasCompletadas: parseInt(metricas?.citasCompletadas || '0'),
-        tiempoPromedioRespuesta: 5, // TODO: calcular real
+        tiempoPromedioRespuesta: 5,
       },
       leadsPorEtapa: leadsPorEtapa.map(e => ({ ...e, total: parseInt(e.total) })),
       leadsPorOrigen: leadsPorOrigen.map(e => ({ ...e, total: parseInt(e.total) })),
       actividadDiaria: actividadDiaria.map(d => ({ ...d, leads: parseInt(d.leads), mensajes: parseInt(d.mensajes) })),
     })
   } catch (error) {
-    console.error('Error:', error)
+    console.error('Error reportes:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
 }

@@ -15,36 +15,52 @@ export async function GET(request: NextRequest) {
     if (numero) {
       // Obtener mensajes de una conversación específica
       const mensajes = await query(
-        `SELECT * FROM historial_conversaciones 
-         WHERE cliente_id = $1 AND numero_whatsapp = $2 
+        `SELECT 
+          id::text,
+          mensaje as texto,
+          rol,
+          created_at as fecha
+         FROM historial_conversaciones
+         WHERE cliente_id = $1 AND numero_whatsapp = $2
          ORDER BY created_at ASC`,
         [user.cliente_id, numero]
       )
-      return NextResponse.json(mensajes)
+      
+      return NextResponse.json({ mensajes })
     }
 
     // Obtener lista de conversaciones
     const conversaciones = await query(
-      `SELECT 
+      `SELECT
         h.numero_whatsapp,
-        MAX(h.created_at) as ultimo_mensaje,
+        MAX(h.created_at) as ultimo_mensaje_fecha,
         COUNT(*) as total_mensajes,
-        (SELECT mensaje FROM historial_conversaciones h2 
-         WHERE h2.numero_whatsapp = h.numero_whatsapp AND h2.cliente_id = h.cliente_id 
+        (SELECT mensaje FROM historial_conversaciones h2
+         WHERE h2.numero_whatsapp = h.numero_whatsapp AND h2.cliente_id = h.cliente_id
          ORDER BY created_at DESC LIMIT 1) as ultimo_texto,
-        (SELECT rol FROM historial_conversaciones h2 
-         WHERE h2.numero_whatsapp = h.numero_whatsapp AND h2.cliente_id = h.cliente_id 
-         ORDER BY created_at DESC LIMIT 1) as ultimo_rol,
-        l.nombre as lead_nombre,
+        COALESCE(l.nombre, c.nombre) as contacto_nombre,
         l.id as lead_id
        FROM historial_conversaciones h
        LEFT JOIN leads l ON l.telefono = h.numero_whatsapp AND l.cliente_id = h.cliente_id
+       LEFT JOIN contactos c ON c.telefono = h.numero_whatsapp AND c.cliente_id = h.cliente_id
        WHERE h.cliente_id = $1
-       GROUP BY h.numero_whatsapp, h.cliente_id, l.nombre, l.id
+       GROUP BY h.numero_whatsapp, h.cliente_id, l.nombre, l.id, c.nombre
        ORDER BY MAX(h.created_at) DESC`,
       [user.cliente_id]
     )
-    return NextResponse.json(conversaciones)
+
+    // Formatear para el frontend
+    const formattedConversaciones = conversaciones.map((c: any) => ({
+      id: c.numero_whatsapp,
+      numero: c.numero_whatsapp,
+      nombre: c.contacto_nombre || c.numero_whatsapp,
+      ultimo_mensaje: c.ultimo_texto || '',
+      fecha: c.ultimo_mensaje_fecha,
+      no_leidos: 0,
+      canal: 'whatsapp' as const
+    }))
+
+    return NextResponse.json(formattedConversaciones)
   } catch (error) {
     console.error('Error conversaciones:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })

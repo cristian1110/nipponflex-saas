@@ -7,204 +7,310 @@ import { useRouter } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 
 interface Conversacion {
-  numero_whatsapp: string
+  id: string
+  numero: string
+  nombre: string
   ultimo_mensaje: string
-  total_mensajes: number
-  ultimo_texto: string
-  ultimo_rol: string
-  lead_nombre?: string
-  lead_id?: number
+  fecha: string
+  no_leidos: number
+  canal: 'whatsapp' | 'telegram' | 'instagram'
 }
 
 interface Mensaje {
-  id: number
-  rol: string
-  mensaje: string
-  created_at: string
+  id: string
+  texto: string
+  rol: 'user' | 'assistant'
+  fecha: string
 }
 
 export default function ConversacionesPage() {
   const router = useRouter()
+  
   const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
   const [conversaciones, setConversaciones] = useState<Conversacion[]>([])
   const [selectedConv, setSelectedConv] = useState<Conversacion | null>(null)
   const [mensajes, setMensajes] = useState<Mensaje[]>([])
   const [nuevoMensaje, setNuevoMensaje] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [filtro, setFiltro] = useState('')
-  const [canalFiltro, setCanalFiltro] = useState('todos')
+  const [enviando, setEnviando] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showNewChat, setShowNewChat] = useState(false)
+  const [newChatNumber, setNewChatNumber] = useState('')
+  const [newChatName, setNewChatName] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const selectedConvRef = useRef<Conversacion | null>(null)
+
+  // Mantener referencia actualizada de selectedConv
+  useEffect(() => {
+    selectedConvRef.current = selectedConv
+  }, [selectedConv])
 
   useEffect(() => {
-    checkAuth()
+    // Obtener parámetro de URL
+    const params = new URLSearchParams(window.location.search)
+    const numero = params.get('numero')
+    checkAuth(numero)
   }, [])
 
+  // Polling para actualizar mensajes cada 3 segundos
   useEffect(() => {
-    if (selectedConv) {
-      loadMensajes(selectedConv.numero_whatsapp)
-    }
-  }, [selectedConv])
+    const interval = setInterval(() => {
+      if (selectedConvRef.current) {
+        loadMensajes(selectedConvRef.current.numero, true)
+      }
+      loadConversaciones(true)
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [mensajes])
 
-  const checkAuth = async () => {
+  const checkAuth = async (numeroInicial?: string | null) => {
     try {
       const res = await fetch('/api/auth/me')
       if (!res.ok) { router.push('/login'); return }
-      const data = await res.json()
-      setUser(data)
-      loadData()
+      const userData = await res.json()
+      setUser(userData)
+      await loadConversaciones()
+      
+      // Si hay número inicial, abrir esa conversación
+      if (numeroInicial) {
+        setTimeout(() => abrirConversacionPorNumero(numeroInicial), 500)
+        window.history.replaceState({}, '', '/conversaciones')
+      }
     } catch { router.push('/login') }
-  }
-
-  const loadData = async () => {
-    try {
-      const res = await fetch('/api/conversaciones')
-      const data = await res.json()
-      setConversaciones(Array.isArray(data) ? data : [])
-    } catch (e) { console.error(e) }
     setLoading(false)
   }
 
-  const loadMensajes = async (numero: string) => {
+  const loadConversaciones = async (silent = false) => {
     try {
-      const res = await fetch(`/api/conversaciones?numero=${numero}`)
+      const res = await fetch('/api/conversaciones')
       const data = await res.json()
-      setMensajes(Array.isArray(data) ? data : [])
-    } catch (e) { console.error(e) }
+      if (Array.isArray(data)) {
+        setConversaciones(data)
+      }
+    } catch (e) {
+      if (!silent) console.error('Error cargando conversaciones:', e)
+    }
+  }
+
+  const loadMensajes = async (numero: string, silent = false) => {
+    try {
+      const res = await fetch(`/api/conversaciones?numero=${encodeURIComponent(numero)}`)
+      const data = await res.json()
+      if (data.mensajes && Array.isArray(data.mensajes)) {
+        setMensajes(prev => {
+          // Solo actualizar si hay nuevos mensajes
+          if (data.mensajes.length !== prev.length) {
+            return data.mensajes
+          }
+          return prev
+        })
+      }
+    } catch (e) {
+      if (!silent) console.error('Error cargando mensajes:', e)
+    }
+  }
+
+  const abrirConversacionPorNumero = async (numero: string) => {
+    let numNormalizado = numero.replace(/\s/g, '').replace(/-/g, '')
+    if (numNormalizado.startsWith('+')) numNormalizado = numNormalizado.substring(1)
+    
+    const convExistente = conversaciones.find(c => {
+      const numConv = c.numero.replace(/\s/g, '').replace(/-/g, '').replace('+', '')
+      return numConv.includes(numNormalizado) || numNormalizado.includes(numConv)
+    })
+    
+    if (convExistente) {
+      selectConversacion(convExistente)
+    } else {
+      const numeroFormateado = numero.startsWith('+') ? numero : `+${numero}`
+      const nuevaConv: Conversacion = {
+        id: `new_${numNormalizado}`,
+        numero: numeroFormateado,
+        nombre: numeroFormateado,
+        ultimo_mensaje: '',
+        fecha: new Date().toISOString(),
+        no_leidos: 0,
+        canal: 'whatsapp'
+      }
+      setSelectedConv(nuevaConv)
+      setMensajes([])
+    }
+  }
+
+  const selectConversacion = async (conv: Conversacion) => {
+    setSelectedConv(conv)
+    await loadMensajes(conv.numero)
   }
 
   const enviarMensaje = async () => {
     if (!nuevoMensaje.trim() || !selectedConv) return
     
+    const mensajeTexto = nuevoMensaje
+    setNuevoMensaje('')
+    setEnviando(true)
+    
+    // Agregar mensaje optimistamente
+    const nuevoMsg: Mensaje = {
+      id: `temp_${Date.now()}`,
+      texto: mensajeTexto,
+      rol: 'assistant',
+      fecha: new Date().toISOString()
+    }
+    setMensajes(prev => [...prev, nuevoMsg])
+    
     try {
-      await fetch('/api/mensajes', {
+      const res = await fetch('/api/mensajes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ numero_whatsapp: selectedConv.numero_whatsapp, mensaje: nuevoMensaje })
+        body: JSON.stringify({
+          numero_whatsapp: selectedConv.numero,
+          mensaje: mensajeTexto
+        })
       })
-      setNuevoMensaje('')
-      loadMensajes(selectedConv.numero_whatsapp)
-    } catch (e) { console.error(e) }
+      
+      if (res.ok) {
+        // Recargar mensajes para obtener el ID real
+        await loadMensajes(selectedConv.numero)
+        
+        if (selectedConv.id.startsWith('new_')) {
+          await loadConversaciones()
+        }
+      } else {
+        const data = await res.json()
+        alert('Error al enviar: ' + (data.error || 'Intenta de nuevo'))
+        // Remover mensaje optimista si falló
+        setMensajes(prev => prev.filter(m => m.id !== nuevoMsg.id))
+        setNuevoMensaje(mensajeTexto)
+      }
+    } catch (e) {
+      console.error('Error enviando:', e)
+      alert('Error al enviar mensaje')
+      setMensajes(prev => prev.filter(m => m.id !== nuevoMsg.id))
+      setNuevoMensaje(mensajeTexto)
+    }
+    setEnviando(false)
   }
 
-  const formatTime = (date: string) => new Date(date).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })
-  const formatDate = (date: string) => {
-    const d = new Date(date)
-    const today = new Date()
-    const yesterday = new Date(today)
-    yesterday.setDate(yesterday.getDate() - 1)
+  const crearNuevaConversacion = () => {
+    if (!newChatNumber.trim()) return
     
-    if (d.toDateString() === today.toDateString()) return 'Hoy'
-    if (d.toDateString() === yesterday.toDateString()) return 'Ayer'
-    return d.toLocaleDateString('es-EC', { day: '2-digit', month: 'short' })
+    let numero = newChatNumber.trim()
+    if (!numero.startsWith('+')) {
+      if (numero.startsWith('593')) numero = '+' + numero
+      else if (numero.startsWith('0')) numero = '+593' + numero.substring(1)
+      else numero = '+593' + numero
+    }
+    
+    const nuevaConv: Conversacion = {
+      id: `new_${numero.replace('+', '')}`,
+      numero: numero,
+      nombre: newChatName || numero,
+      ultimo_mensaje: '',
+      fecha: new Date().toISOString(),
+      no_leidos: 0,
+      canal: 'whatsapp'
+    }
+    
+    setSelectedConv(nuevaConv)
+    setMensajes([])
+    setShowNewChat(false)
+    setNewChatNumber('')
+    setNewChatName('')
   }
 
-  const conversacionesFiltradas = conversaciones.filter(conv => {
-    const matchTexto = !filtro || 
-      (conv.lead_nombre?.toLowerCase().includes(filtro.toLowerCase())) ||
-      conv.numero_whatsapp.includes(filtro)
-    return matchTexto
-  })
+  const filteredConversaciones = conversaciones.filter(c =>
+    c.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.numero.includes(searchTerm)
+  )
 
-  const canales = [
-    { id: 'todos', label: 'Todos', icon: '💬', count: conversaciones.length },
-    { id: 'whatsapp', label: 'WhatsApp', icon: '💚', count: conversaciones.length },
-    { id: 'telegram', label: 'Telegram', icon: '✈️', count: 0 },
-    { id: 'instagram', label: 'Instagram', icon: '📸', count: 0 },
-    { id: 'messenger', label: 'Messenger', icon: '💙', count: 0 },
-    { id: 'email', label: 'Email', icon: '📧', count: 0 },
-  ]
+  const formatFecha = (fecha: string) => {
+    const date = new Date(fecha)
+    const hoy = new Date()
+    const ayer = new Date(hoy)
+    ayer.setDate(ayer.getDate() - 1)
+    
+    if (date.toDateString() === hoy.toDateString()) {
+      return date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })
+    } else if (date.toDateString() === ayer.toDateString()) {
+      return 'Ayer'
+    } else {
+      return date.toLocaleDateString('es', { day: '2-digit', month: '2-digit' })
+    }
+  }
 
-  if (loading) return <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center"><div className="animate-spin h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full"></div></div>
+  if (loading) return <div className="flex h-screen bg-[var(--bg-primary)] items-center justify-center"><div className="animate-spin h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full"></div></div>
 
   return (
     <div className="flex h-screen bg-[var(--bg-primary)]">
       <Sidebar user={user} />
       
       <div className="flex-1 flex overflow-hidden">
-        {/* Panel izquierdo - Lista de conversaciones */}
-        <div className="w-80 border-r border-[var(--border-color)] flex flex-col bg-[var(--bg-secondary)]">
-          {/* Header */}
+        {/* Lista de conversaciones */}
+        <div className="w-80 border-r border-[var(--border-color)] flex flex-col">
           <div className="p-4 border-b border-[var(--border-color)]">
-            <h1 className="text-lg font-bold text-[var(--text-primary)] mb-3">Conversaciones</h1>
-            
-            {/* Filtro por canal */}
-            <div className="flex gap-1 overflow-x-auto pb-2 mb-3">
-              {canales.map(canal => (
-                <button
-                  key={canal.id}
-                  onClick={() => setCanalFiltro(canal.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors ${
-                    canalFiltro === canal.id 
-                      ? 'bg-emerald-600 text-white' 
-                      : 'bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
-                  }`}
-                >
-                  <span>{canal.icon}</span>
-                  <span>{canal.label}</span>
-                  {canal.count > 0 && <span className="bg-white/20 px-1.5 rounded-full">{canal.count}</span>}
-                </button>
-              ))}
+            <div className="flex items-center justify-between mb-3">
+              <h1 className="text-lg font-bold text-[var(--text-primary)]">Conversaciones</h1>
+              <button onClick={() => setShowNewChat(true)} className="p-2 bg-emerald-600 rounded-lg text-white text-sm" title="Nueva conversación">
+                ✏️
+              </button>
             </div>
-
-            {/* Búsqueda */}
+            <div className="flex gap-2 mb-3 overflow-x-auto">
+              <span className="px-2 py-1 bg-emerald-600 text-white rounded-full text-xs whitespace-nowrap">● Todos {conversaciones.length}</span>
+              <span className="px-2 py-1 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-full text-xs whitespace-nowrap">💚 WhatsApp {conversaciones.filter(c => c.canal === 'whatsapp').length}</span>
+            </div>
             <div className="relative">
               <input 
                 type="text" 
                 placeholder="Buscar conversación..." 
-                value={filtro}
-                onChange={(e) => setFiltro(e.target.value)}
-                className="w-full px-4 py-2 pl-10 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" 
               />
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]">🔍</span>
+              <span className="absolute left-2.5 top-2.5 text-[var(--text-tertiary)]">🔍</span>
             </div>
           </div>
-
-          {/* Lista de conversaciones */}
+          
           <div className="flex-1 overflow-y-auto">
-            {conversacionesFiltradas.length === 0 ? (
-              <div className="p-8 text-center">
-                <div className="text-4xl mb-3">💬</div>
-                <p className="text-[var(--text-secondary)]">No hay conversaciones</p>
-                <p className="text-xs text-[var(--text-tertiary)] mt-1">Las conversaciones aparecerán aquí cuando recibas mensajes</p>
+            {filteredConversaciones.length === 0 ? (
+              <div className="p-4 text-center text-[var(--text-secondary)]">
+                <p className="text-sm">No hay conversaciones</p>
+                <button onClick={() => setShowNewChat(true)} className="mt-2 text-emerald-500 text-sm hover:underline">+ Nueva conversación</button>
               </div>
             ) : (
-              conversacionesFiltradas.map(conv => (
+              filteredConversaciones.map(conv => (
                 <div
-                  key={conv.numero_whatsapp}
-                  onClick={() => setSelectedConv(conv)}
-                  className={`p-4 border-b border-[var(--border-color)] cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors ${
-                    selectedConv?.numero_whatsapp === conv.numero_whatsapp ? 'bg-[var(--bg-tertiary)]' : ''
+                  key={conv.id}
+                  onClick={() => selectConversacion(conv)}
+                  className={`p-3 border-b border-[var(--border-color)] cursor-pointer hover:bg-[var(--bg-secondary)] ${
+                    selectedConv?.id === conv.id ? 'bg-[var(--bg-secondary)]' : ''
                   }`}
                 >
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-center gap-3">
                     <div className="relative">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center text-white font-bold text-lg">
-                        {(conv.lead_nombre || conv.numero_whatsapp)[0].toUpperCase()}
+                      <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold">
+                        {conv.nombre.charAt(0).toUpperCase()}
                       </div>
-                      <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center text-xs">
-                        💬
-                      </div>
+                      {conv.no_leidos > 0 && (
+                        <span className="absolute -top-1 -right-1 w-5 h-5 bg-emerald-500 rounded-full text-white text-xs flex items-center justify-center">
+                          {conv.no_leidos}
+                        </span>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="font-medium text-[var(--text-primary)] truncate">
-                          {conv.lead_nombre || conv.numero_whatsapp}
-                        </span>
-                        <span className="text-xs text-[var(--text-tertiary)] flex-shrink-0 ml-2">
-                          {formatDate(conv.ultimo_mensaje)}
-                        </span>
+                      <div className="flex justify-between items-baseline">
+                        <span className="font-medium text-[var(--text-primary)] truncate">{conv.nombre}</span>
+                        <span className="text-xs text-[var(--text-tertiary)] ml-2">{formatFecha(conv.fecha)}</span>
                       </div>
-                      <p className="text-sm text-[var(--text-secondary)] truncate">
-                        {conv.ultimo_rol === 'assistant' && <span className="text-emerald-400">✓ </span>}
-                        {conv.ultimo_texto || 'Sin mensajes'}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-[var(--text-tertiary)]">{conv.numero_whatsapp}</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-[var(--text-secondary)]">✓</span>
+                        <span className="text-sm text-[var(--text-secondary)] truncate">{conv.ultimo_mensaje || 'Sin mensajes'}</span>
                       </div>
+                      <span className="text-xs text-[var(--text-tertiary)]">{conv.numero}</span>
                     </div>
                   </div>
                 </div>
@@ -213,129 +319,131 @@ export default function ConversacionesPage() {
           </div>
         </div>
 
-        {/* Panel derecho - Chat */}
-        {selectedConv ? (
-          <div className="flex-1 flex flex-col bg-[var(--bg-primary)]">
-            {/* Header del chat */}
-            <div className="p-4 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-secondary)]">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center text-white font-bold">
-                  {(selectedConv.lead_nombre || selectedConv.numero_whatsapp)[0].toUpperCase()}
+        {/* Área de chat */}
+        <div className="flex-1 flex flex-col">
+          {selectedConv ? (
+            <>
+              {/* Header del chat */}
+              <div className="p-4 border-b border-[var(--border-color)] flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold">
+                  {selectedConv.nombre.charAt(0).toUpperCase()}
                 </div>
-                <div>
-                  <h2 className="font-bold text-[var(--text-primary)]">{selectedConv.lead_nombre || selectedConv.numero_whatsapp}</h2>
-                  <p className="text-xs text-[var(--text-secondary)] flex items-center gap-1">
-                    <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                    {selectedConv.numero_whatsapp} • WhatsApp
-                  </p>
+                <div className="flex-1">
+                  <h2 className="font-medium text-[var(--text-primary)]">{selectedConv.nombre}</h2>
+                  <p className="text-xs text-[var(--text-secondary)]">{selectedConv.numero} • WhatsApp</p>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="p-2 hover:bg-[var(--bg-tertiary)] rounded-lg text-[var(--text-secondary)]" title="Ver perfil">
-                  👤
-                </button>
                 <button 
-                  onClick={() => router.push(`/crm?lead=${selectedConv.lead_id}`)}
-                  className="p-2 hover:bg-[var(--bg-tertiary)] rounded-lg text-[var(--text-secondary)]" 
-                  title="Ver en CRM"
+                  onClick={() => loadMensajes(selectedConv.numero)} 
+                  className="p-2 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg"
+                  title="Actualizar"
                 >
-                  📋
+                  🔄
                 </button>
               </div>
-            </div>
 
-            {/* Mensajes */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%239C92AC" fill-opacity="0.05"%3E%3Cpath d="M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")' }}>
-              {mensajes.length === 0 ? (
-                <div className="h-full flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="text-6xl mb-4">💬</div>
-                    <p className="text-[var(--text-secondary)]">No hay mensajes aún</p>
+              {/* Mensajes */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {mensajes.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center text-[var(--text-secondary)]">
+                      <div className="text-4xl mb-2">💬</div>
+                      <p>Inicia la conversación</p>
+                      <p className="text-xs mt-1">Escribe un mensaje para comenzar</p>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                mensajes.map((msg, idx) => {
-                  const showDate = idx === 0 || 
-                    new Date(mensajes[idx-1].created_at).toDateString() !== new Date(msg.created_at).toDateString()
-                  
-                  return (
-                    <div key={msg.id}>
-                      {showDate && (
-                        <div className="flex justify-center my-4">
-                          <span className="px-3 py-1 bg-[var(--bg-secondary)] rounded-full text-xs text-[var(--text-tertiary)]">
-                            {formatDate(msg.created_at)}
-                          </span>
-                        </div>
-                      )}
-                      <div className={`flex ${msg.rol === 'assistant' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[70%] p-3 rounded-2xl shadow-sm ${
-                          msg.rol === 'assistant' 
-                            ? 'bg-emerald-600 text-white rounded-br-md' 
-                            : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-md'
-                        }`}>
-                          <p className="text-sm whitespace-pre-wrap break-words">{msg.mensaje}</p>
-                          <p className={`text-xs mt-1 text-right ${msg.rol === 'assistant' ? 'text-emerald-200' : 'text-[var(--text-tertiary)]'}`}>
-                            {formatTime(msg.created_at)}
-                            {msg.rol === 'assistant' && ' ✓✓'}
-                          </p>
-                        </div>
+                ) : (
+                  mensajes.map(msg => (
+                    <div key={msg.id} className={`flex ${msg.rol === 'assistant' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[70%] p-3 rounded-lg ${
+                        msg.rol === 'assistant' 
+                          ? 'bg-emerald-600 text-white rounded-br-none' 
+                          : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-none'
+                      }`}>
+                        <p className="text-sm whitespace-pre-wrap">{msg.texto}</p>
+                        <p className={`text-[10px] mt-1 ${msg.rol === 'assistant' ? 'text-emerald-100' : 'text-[var(--text-tertiary)]'}`}>
+                          {new Date(msg.fecha).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}
+                          {msg.rol === 'assistant' && ' ✓✓'}
+                        </p>
                       </div>
                     </div>
-                  )
-                })
-              )}
-              <div ref={messagesEndRef} />
-            </div>
+                  ))
+                )}
+                <div ref={messagesEndRef} />
+              </div>
 
-            {/* Input de mensaje */}
-            <div className="p-4 border-t border-[var(--border-color)] bg-[var(--bg-secondary)]">
-              <div className="flex items-center gap-2">
-                <button className="p-2 hover:bg-[var(--bg-tertiary)] rounded-full text-[var(--text-secondary)]">
-                  📎
-                </button>
-                <input
-                  type="text"
-                  value={nuevoMensaje}
-                  onChange={(e) => setNuevoMensaje(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && enviarMensaje()}
-                  placeholder="Escribe un mensaje..."
-                  className="flex-1 px-4 py-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-full text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-                <button className="p-2 hover:bg-[var(--bg-tertiary)] rounded-full text-[var(--text-secondary)]">
-                  😊
-                </button>
-                <button 
-                  onClick={enviarMensaje}
-                  disabled={!nuevoMensaje.trim()}
-                  className="p-3 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
+              {/* Input de mensaje */}
+              <div className="p-4 border-t border-[var(--border-color)]">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Escribe un mensaje..."
+                    value={nuevoMensaje}
+                    onChange={(e) => setNuevoMensaje(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && enviarMensaje()}
+                    disabled={enviando}
+                    className="flex-1 px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-full text-sm text-[var(--text-primary)] disabled:opacity-50"
+                  />
+                  <button 
+                    onClick={enviarMensaje}
+                    disabled={enviando || !nuevoMensaje.trim()}
+                    className="p-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50"
+                  >
+                    {enviando ? '...' : '➤'}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <div className="w-20 h-20 bg-[var(--bg-secondary)] rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-4xl">💬</span>
+                </div>
+                <h2 className="text-xl font-medium text-[var(--text-primary)]">Tus conversaciones</h2>
+                <p className="text-[var(--text-secondary)] mt-2">Selecciona una conversación o inicia una nueva</p>
+                <button onClick={() => setShowNewChat(true)} className="mt-4 px-4 py-2 bg-emerald-600 text-white rounded-lg">
+                  ✏️ Nueva conversación
                 </button>
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center bg-[var(--bg-secondary)]">
-            <div className="text-center max-w-md">
-              <div className="w-32 h-32 mx-auto mb-6 bg-[var(--bg-tertiary)] rounded-full flex items-center justify-center">
-                <span className="text-6xl">💬</span>
-              </div>
-              <h3 className="text-xl font-bold text-[var(--text-primary)] mb-2">Tus conversaciones</h3>
-              <p className="text-[var(--text-secondary)]">
-                Selecciona una conversación para ver los mensajes o espera a que tus clientes te escriban.
-              </p>
-              <button 
-                onClick={() => router.push('/integraciones')}
-                className="mt-4 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 inline-flex items-center gap-2"
-              >
-                🔗 Configurar canales
-              </button>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+
+      {/* Modal Nueva Conversación */}
+      {showNewChat && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--bg-secondary)] rounded-xl p-5 w-full max-w-sm">
+            <h3 className="font-bold text-[var(--text-primary)] mb-4">Nueva Conversación</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-[var(--text-secondary)]">Número de WhatsApp *</label>
+                <input 
+                  type="tel" 
+                  placeholder="0999999999" 
+                  value={newChatNumber}
+                  onChange={(e) => setNewChatNumber(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" 
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-secondary)]">Nombre (opcional)</label>
+                <input 
+                  type="text" 
+                  placeholder="Nombre del contacto" 
+                  value={newChatName}
+                  onChange={(e) => setNewChatName(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" 
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setShowNewChat(false)} className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
+              <button onClick={crearNuevaConversacion} disabled={!newChatNumber.trim()} className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm disabled:opacity-50">Iniciar Chat</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

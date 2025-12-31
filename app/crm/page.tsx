@@ -81,6 +81,8 @@ export default function CRMPage() {
   const [showNewLead, setShowNewLead] = useState(false)
   const [showEditPipeline, setShowEditPipeline] = useState(false)
   const [showLeadDetail, setShowLeadDetail] = useState(false)
+  const [showSelectContacto, setShowSelectContacto] = useState(false)
+  const [showAddToPipeline, setShowAddToPipeline] = useState(false)
   
   // Plantillas
   const [plantillas, setPlantillas] = useState<Plantilla[]>([])
@@ -89,15 +91,24 @@ export default function CRMPage() {
   const [newPipeline, setNewPipeline] = useState({ nombre: '', descripcion: '', color: '#3498db', icono: '📊' })
   const [newEtapa, setNewEtapa] = useState({ nombre: '', color: '#3498db' })
   const [newLead, setNewLead] = useState({ nombre: '', telefono: '', email: '', empresa: '', valor_estimado: 0 })
+  const [leadMode, setLeadMode] = useState<'nuevo' | 'existente'>('nuevo')
+  
+  // Para agregar contacto a pipeline
+  const [contactoToAdd, setContactoToAdd] = useState<Contacto | null>(null)
+  const [selectedPipelineForAdd, setSelectedPipelineForAdd] = useState<number | null>(null)
+  const [selectedEtapaForAdd, setSelectedEtapaForAdd] = useState<number | null>(null)
+  const [etapasForAdd, setEtapasForAdd] = useState<Etapa[]>([])
   
   // Contactos con paginación
   const [contactos, setContactos] = useState<Contacto[]>([])
+  const [allContactos, setAllContactos] = useState<Contacto[]>([])
   const [totalContactos, setTotalContactos] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [totalPages, setTotalPages] = useState(1)
   const [selectedContactos, setSelectedContactos] = useState<number[]>([])
   const [searchContacto, setSearchContacto] = useState('')
+  const [searchContactoModal, setSearchContactoModal] = useState('')
   const [showImport, setShowImport] = useState(false)
   const [showNewContacto, setShowNewContacto] = useState(false)
   const [showEditContacto, setShowEditContacto] = useState(false)
@@ -116,10 +127,19 @@ export default function CRMPage() {
       const res = await fetch('/api/auth/me')
       if (!res.ok) { router.push('/login'); return }
       setUser(await res.json())
-      loadPipelines()
+      loadPipelines(); fetchTotalContactos()
       loadPlantillas()
+      loadAllContactos()
     } catch { router.push('/login') }
     setLoading(false)
+  }
+
+  const fetchTotalContactos = async () => {
+    try {
+      const res = await fetch(`/api/contactos?limit=1`)
+      const data = await res.json()
+      setTotalContactos(data.total || 0)
+    } catch (e) { console.error(e) }
   }
 
   const loadPipelines = async () => {
@@ -152,6 +172,19 @@ export default function CRMPage() {
     setTotalPages(Math.ceil((data.total || 0) / itemsPerPage))
   }
 
+  const loadAllContactos = async () => {
+    const res = await fetch(`/api/contactos?limit=1000`)
+    const data = await res.json()
+    setAllContactos(data.contactos || [])
+  }
+
+  const loadEtapasForPipeline = async (pipelineId: number) => {
+    const res = await fetch(`/api/crm/etapas?pipeline_id=${pipelineId}`)
+    const data = await res.json()
+    setEtapasForAdd(data || [])
+    if (data.length > 0) setSelectedEtapaForAdd(data[0].id)
+  }
+
   const handleSearch = () => {
     setCurrentPage(1)
     loadContactos()
@@ -172,7 +205,7 @@ export default function CRMPage() {
       body: JSON.stringify({ plantilla_id: plantillaId })
     })
     setShowPlantillas(false)
-    loadPipelines()
+    loadPipelines(); fetchTotalContactos()
   }
 
   const crearPipelinePersonalizado = async () => {
@@ -183,7 +216,7 @@ export default function CRMPage() {
     })
     setShowNewPipeline(false)
     setNewPipeline({ nombre: '', descripcion: '', color: '#3498db', icono: '📊' })
-    loadPipelines()
+    loadPipelines(); fetchTotalContactos()
   }
 
   const eliminarPipeline = async () => {
@@ -191,7 +224,7 @@ export default function CRMPage() {
     if (!confirm(`¿Eliminar pipeline "${selectedPipeline.nombre}" y todos sus leads?`)) return
     await fetch(`/api/pipelines?id=${selectedPipeline.id}`, { method: 'DELETE' })
     setSelectedPipeline(null)
-    loadPipelines()
+    loadPipelines(); fetchTotalContactos()
   }
 
   // Etapa handlers
@@ -223,6 +256,26 @@ export default function CRMPage() {
     })
     setShowNewLead(false)
     setNewLead({ nombre: '', telefono: '', email: '', empresa: '', valor_estimado: 0 })
+    loadPipelineData()
+  }
+
+  const crearLeadDesdeContacto = async (contacto: Contacto) => {
+    if (!selectedPipeline || etapas.length === 0) return
+    await fetch('/api/crm/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nombre: contacto.nombre,
+        telefono: contacto.telefono,
+        email: contacto.email,
+        empresa: contacto.empresa,
+        pipeline_id: selectedPipeline.id,
+        etapa_id: etapas[0]?.id
+      })
+    })
+    setShowSelectContacto(false)
+    setShowNewLead(false)
+    setSearchContactoModal('')
     loadPipelineData()
   }
 
@@ -264,25 +317,37 @@ export default function CRMPage() {
     setSelectedLeads(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])
   }
 
-  const convertirContactoALead = async (contacto: Contacto) => {
-    if (!selectedPipeline || etapas.length === 0) {
-      alert('Selecciona un pipeline primero')
-      return
-    }
+  // Abrir modal para agregar contacto a pipeline
+  const openAddToPipeline = (contacto: Contacto) => {
+    setContactoToAdd(contacto)
+    setSelectedPipelineForAdd(pipelines[0]?.id || null)
+    if (pipelines[0]?.id) loadEtapasForPipeline(pipelines[0].id)
+    setShowAddToPipeline(true)
+  }
+
+  const handlePipelineChange = (pipelineId: number) => {
+    setSelectedPipelineForAdd(pipelineId)
+    loadEtapasForPipeline(pipelineId)
+  }
+
+  const agregarContactoAPipeline = async () => {
+    if (!contactoToAdd || !selectedPipelineForAdd || !selectedEtapaForAdd) return
     await fetch('/api/crm/leads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        nombre: contacto.nombre,
-        telefono: contacto.telefono,
-        email: contacto.email,
-        empresa: contacto.empresa,
-        pipeline_id: selectedPipeline.id,
-        etapa_id: etapas[0]?.id
+        nombre: contactoToAdd.nombre,
+        telefono: contactoToAdd.telefono,
+        email: contactoToAdd.email,
+        empresa: contactoToAdd.empresa,
+        pipeline_id: selectedPipelineForAdd,
+        etapa_id: selectedEtapaForAdd
       })
     })
-    alert('Contacto agregado al pipeline')
+    setShowAddToPipeline(false)
+    setContactoToAdd(null)
     loadPipelineData()
+    alert('✅ Contacto agregado al pipeline')
   }
 
   // Contactos handlers
@@ -310,6 +375,7 @@ export default function CRMPage() {
       })
       setImportResult(await res.json())
       loadContactos()
+      loadAllContactos()
     } catch { setImportResult({ error: 'Error al procesar archivo' }) }
     setImporting(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -324,6 +390,7 @@ export default function CRMPage() {
     setShowNewContacto(false)
     setNewContacto({ nombre: '', telefono: '', email: '', empresa: '' })
     loadContactos()
+    loadAllContactos()
   }
 
   const actualizarContacto = async () => {
@@ -336,6 +403,7 @@ export default function CRMPage() {
     setShowEditContacto(false)
     setEditContacto(null)
     loadContactos()
+    loadAllContactos()
   }
 
   const eliminarContactos = async (ids?: number[]) => {
@@ -349,6 +417,7 @@ export default function CRMPage() {
     })
     setSelectedContactos([])
     loadContactos()
+    loadAllContactos()
   }
 
   const eliminarTodosContactos = async () => {
@@ -359,6 +428,7 @@ export default function CRMPage() {
       body: JSON.stringify({ deleteAll: true })
     })
     loadContactos()
+    loadAllContactos()
   }
 
   const getPageNumbers = () => {
@@ -377,6 +447,12 @@ export default function CRMPage() {
     }
     return pages
   }
+
+  // Filtrar contactos para el modal de selección
+  const filteredContactos = allContactos.filter(c => 
+    c.nombre.toLowerCase().includes(searchContactoModal.toLowerCase()) ||
+    c.telefono.includes(searchContactoModal)
+  ).slice(0, 20)
 
   if (loading) return <div className="flex h-screen bg-[var(--bg-primary)] items-center justify-center"><div className="animate-spin h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full"></div></div>
 
@@ -425,7 +501,7 @@ export default function CRMPage() {
               )}
               <button onClick={eliminarTodosLeads} className="px-3 py-1.5 bg-red-500/10 text-red-400 rounded-lg text-sm">🗑️ Vaciar</button>
               <button onClick={() => setShowNewEtapa(true)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm">+ Etapa</button>
-              <button onClick={() => setShowNewLead(true)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm">+ Lead</button>
+              <button onClick={() => { setShowNewLead(true); setLeadMode('nuevo') }} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm">+ Lead</button>
               <button onClick={() => setShowEditPipeline(true)} className="px-2 py-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg">⚙️</button>
             </div>
 
@@ -540,9 +616,9 @@ export default function CRMPage() {
                       <td className="p-3 text-[var(--text-secondary)]">{c.email || '-'}</td>
                       <td className="p-3 text-[var(--text-secondary)]">{c.empresa || '-'}</td>
                       <td className="p-3">
-                        <button onClick={() => { setEditContacto(c); setShowEditContacto(true) }} className="text-xs text-blue-400 hover:underline mr-3">✏️ Editar</button>
-                        <button onClick={() => convertirContactoALead(c)} className="text-xs text-emerald-400 hover:underline mr-3">→ Pipeline</button>
-                        <button onClick={() => eliminarContactos([c.id])} className="text-xs text-red-400 hover:underline">Eliminar</button>
+                        <button onClick={() => { setEditContacto(c); setShowEditContacto(true) }} className="text-xs text-blue-400 hover:underline mr-3">✏️</button>
+                        <button onClick={() => openAddToPipeline(c)} className="text-xs text-emerald-400 hover:underline mr-3">📊 Pipeline</button>
+                        <button onClick={() => eliminarContactos([c.id])} className="text-xs text-red-400 hover:underline">🗑️</button>
                       </td>
                     </tr>
                   ))}
@@ -671,21 +747,104 @@ export default function CRMPage() {
         </div>
       )}
 
-      {/* Modal Nuevo Lead */}
+      {/* Modal Nuevo Lead - Con opción de seleccionar contacto */}
       {showNewLead && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[var(--bg-secondary)] rounded-xl p-5 w-full max-w-sm">
+          <div className="bg-[var(--bg-secondary)] rounded-xl p-5 w-full max-w-md">
             <h3 className="font-bold text-[var(--text-primary)] mb-4">Nuevo Lead</h3>
-            <div className="space-y-3">
-              <input type="text" placeholder="Nombre" value={newLead.nombre} onChange={(e) => setNewLead({ ...newLead, nombre: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
-              <input type="tel" placeholder="Teléfono *" value={newLead.telefono} onChange={(e) => setNewLead({ ...newLead, telefono: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
-              <input type="email" placeholder="Email" value={newLead.email} onChange={(e) => setNewLead({ ...newLead, email: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
-              <input type="text" placeholder="Empresa" value={newLead.empresa} onChange={(e) => setNewLead({ ...newLead, empresa: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
-              <input type="number" placeholder="Valor $" value={newLead.valor_estimado || ''} onChange={(e) => setNewLead({ ...newLead, valor_estimado: Number(e.target.value) })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+            
+            {/* Tabs para elegir modo */}
+            <div className="flex gap-2 mb-4">
+              <button onClick={() => setLeadMode('nuevo')} className={`flex-1 py-2 rounded-lg text-sm ${leadMode === 'nuevo' ? 'bg-emerald-600 text-white' : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'}`}>
+                ✏️ Crear Nuevo
+              </button>
+              <button onClick={() => setLeadMode('existente')} className={`flex-1 py-2 rounded-lg text-sm ${leadMode === 'existente' ? 'bg-emerald-600 text-white' : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'}`}>
+                👥 De Contactos
+              </button>
             </div>
+
+            {leadMode === 'nuevo' ? (
+              <div className="space-y-3">
+                <input type="text" placeholder="Nombre" value={newLead.nombre} onChange={(e) => setNewLead({ ...newLead, nombre: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+                <input type="tel" placeholder="Teléfono *" value={newLead.telefono} onChange={(e) => setNewLead({ ...newLead, telefono: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+                <input type="email" placeholder="Email" value={newLead.email} onChange={(e) => setNewLead({ ...newLead, email: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+                <input type="text" placeholder="Empresa" value={newLead.empresa} onChange={(e) => setNewLead({ ...newLead, empresa: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+                <input type="number" placeholder="Valor $" value={newLead.valor_estimado || ''} onChange={(e) => setNewLead({ ...newLead, valor_estimado: Number(e.target.value) })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setShowNewLead(false)} className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
+                  <button onClick={crearLead} disabled={!newLead.telefono} className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm disabled:opacity-50">Crear</button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <input type="text" placeholder="Buscar contacto..." value={searchContactoModal} onChange={(e) => setSearchContactoModal(e.target.value)} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+                <div className="max-h-64 overflow-y-auto space-y-1">
+                  {filteredContactos.length === 0 ? (
+                    <p className="text-center text-sm text-[var(--text-tertiary)] py-4">No hay contactos</p>
+                  ) : (
+                    filteredContactos.map(c => (
+                      <div key={c.id} onClick={() => crearLeadDesdeContacto(c)} className="p-2 rounded-lg cursor-pointer hover:bg-[var(--bg-tertiary)] flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-sm font-bold">
+                          {c.nombre.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-[var(--text-primary)] truncate">{c.nombre}</p>
+                          <p className="text-xs text-[var(--text-secondary)]">{c.telefono}</p>
+                        </div>
+                        <span className="text-emerald-400 text-xs">+ Agregar</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <button onClick={() => setShowNewLead(false)} className="w-full px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Agregar Contacto a Pipeline */}
+      {showAddToPipeline && contactoToAdd && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--bg-secondary)] rounded-xl p-5 w-full max-w-sm">
+            <h3 className="font-bold text-[var(--text-primary)] mb-4">Agregar a Pipeline</h3>
+            
+            <div className="p-3 bg-[var(--bg-primary)] rounded-lg mb-4">
+              <p className="font-medium text-[var(--text-primary)]">{contactoToAdd.nombre}</p>
+              <p className="text-sm text-[var(--text-secondary)]">{contactoToAdd.telefono}</p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-[var(--text-secondary)]">Pipeline</label>
+                <select 
+                  value={selectedPipelineForAdd || ''} 
+                  onChange={(e) => handlePipelineChange(Number(e.target.value))}
+                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                >
+                  {pipelines.map(p => (
+                    <option key={p.id} value={p.id}>{p.icono} {p.nombre}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="text-xs text-[var(--text-secondary)]">Etapa</label>
+                <select 
+                  value={selectedEtapaForAdd || ''} 
+                  onChange={(e) => setSelectedEtapaForAdd(Number(e.target.value))}
+                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                >
+                  {etapasForAdd.map(e => (
+                    <option key={e.id} value={e.id}>{e.nombre}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <div className="flex gap-2 mt-4">
-              <button onClick={() => setShowNewLead(false)} className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
-              <button onClick={crearLead} disabled={!newLead.telefono} className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm disabled:opacity-50">Crear</button>
+              <button onClick={() => { setShowAddToPipeline(false); setContactoToAdd(null) }} className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
+              <button onClick={agregarContactoAPipeline} disabled={!selectedPipelineForAdd || !selectedEtapaForAdd} className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm disabled:opacity-50">Agregar</button>
             </div>
           </div>
         </div>
