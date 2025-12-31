@@ -42,7 +42,7 @@ export default function Sidebar({ user }: SidebarProps) {
   }
 
   return (
-    <aside className={`fixed left-0 top-0 h-full bg-[var(--sidebar-bg)] border-r border-[var(--border-color)] transition-all duration-300 z-50 ${collapsed ? 'w-20' : 'w-64'}`}>
+    <aside className={`h-screen bg-[var(--sidebar-bg)] border-r border-[var(--border-color)] transition-all duration-300 flex-shrink-0 flex flex-col ${collapsed ? 'w-20' : 'w-64'}`}>
       {/* Logo */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-[var(--border-color)]">
         <div className="flex items-center gap-3">
