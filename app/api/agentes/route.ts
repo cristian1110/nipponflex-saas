@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { query, queryOne, execute } from '@/lib/db'
+import { query, queryOne } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
 
-export async function GET(request: NextRequest) {
+export const dynamic = 'force-dynamic'
+
+export async function GET() {
   try {
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     const agentes = await query(
-      `SELECT * FROM agentes WHERE cliente_id = $1 ORDER BY created_at DESC`,
+      `SELECT * FROM configuracion_agente WHERE cliente_id = $1 ORDER BY created_at DESC`,
       [user.cliente_id]
     )
     return NextResponse.json(agentes)
   } catch (error) {
-    console.error('Error:', error)
+    console.error('Error agentes:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
 }
@@ -22,20 +24,46 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
-    if (user.nivel < 3) return NextResponse.json({ error: 'Sin permisos' }, { status: 403 })
 
     const body = await request.json()
-    const { nombre, descripcion, prompt_sistema, personalidad, temperatura, modelo, whatsapp_numero, telegram_bot } = body
+    const { nombre_agente, prompt_sistema, temperatura, max_tokens } = body
 
     const agente = await queryOne(
-      `INSERT INTO agentes (cliente_id, nombre, descripcion, prompt_sistema, personalidad, temperatura, modelo, whatsapp_numero, telegram_bot, activo)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+      `INSERT INTO configuracion_agente (cliente_id, nombre_agente, prompt_sistema, temperatura, max_tokens)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [user.cliente_id, nombre, descripcion, prompt_sistema, personalidad || 'profesional', temperatura || 0.7, modelo || 'llama-3.3-70b-versatile', whatsapp_numero, telegram_bot]
+      [user.cliente_id, nombre_agente, prompt_sistema, temperatura || 0.7, max_tokens || 300]
     )
     return NextResponse.json(agente, { status: 201 })
   } catch (error) {
-    console.error('Error:', error)
+    console.error('Error crear agente:', error)
+    return NextResponse.json({ error: 'Error interno' }, { status: 500 })
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+    const body = await request.json()
+    const { id, nombre_agente, prompt_sistema, temperatura, max_tokens, activo } = body
+
+    const agente = await queryOne(
+      `UPDATE configuracion_agente 
+       SET nombre_agente = COALESCE($1, nombre_agente),
+           prompt_sistema = COALESCE($2, prompt_sistema),
+           temperatura = COALESCE($3, temperatura),
+           max_tokens = COALESCE($4, max_tokens),
+           activo = COALESCE($5, activo),
+           updated_at = NOW()
+       WHERE id = $6 AND cliente_id = $7
+       RETURNING *`,
+      [nombre_agente, prompt_sistema, temperatura, max_tokens, activo, id, user.cliente_id]
+    )
+    return NextResponse.json(agente)
+  } catch (error) {
+    console.error('Error actualizar agente:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
 }

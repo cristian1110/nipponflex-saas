@@ -1,47 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { query } from '@/lib/db'
-import type { Etapa } from '@/types'
+import { getCurrentUser } from '@/lib/auth'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
     const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
-    const etapas = await query<Etapa>(
-      'SELECT * FROM etapas_pipeline WHERE cliente_id = $1 ORDER BY orden ASC',
-      [user.cliente_id || 1]
+    const etapas = await query(
+      `SELECT e.*, 
+        (SELECT COUNT(*) FROM leads l WHERE l.etapa_id = e.id AND l.cliente_id = $1) as total_leads,
+        (SELECT COALESCE(SUM(valor_estimado), 0) FROM leads l WHERE l.etapa_id = e.id AND l.cliente_id = $1) as valor_total
+       FROM etapas_crm e 
+       WHERE e.cuenta_id = 1
+       ORDER BY e.orden`,
+      [user.cliente_id]
     )
-
     return NextResponse.json(etapas)
   } catch (error) {
-    console.error('Error fetching etapas:', error)
-    return NextResponse.json({ error: 'Error interno' }, { status: 500 })
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const user = await getCurrentUser()
-    if (!user || user.nivel < 3) {
-      return NextResponse.json({ error: 'Sin permisos' }, { status: 403 })
-    }
-
-    const data = await request.json()
-    const { nombre, color, orden } = data
-
-    const result = await query<Etapa>(
-      `INSERT INTO etapas_pipeline (cliente_id, nombre, color, orden)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [user.cliente_id || 1, nombre, color || '#6366f1', orden || 99]
-    )
-
-    return NextResponse.json(result[0], { status: 201 })
-  } catch (error) {
-    console.error('Error creating etapa:', error)
+    console.error('Error etapas:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
 }

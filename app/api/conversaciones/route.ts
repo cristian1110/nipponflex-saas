@@ -1,70 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { query } from '@/lib/db'
-import type { Conversacion } from '@/types'
+import { getCurrentUser } from '@/lib/auth'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+    const { searchParams } = new URL(request.url)
+    const numero = searchParams.get('numero')
+
+    if (numero) {
+      // Obtener mensajes de una conversación específica
+      const mensajes = await query(
+        `SELECT * FROM historial_conversaciones 
+         WHERE cliente_id = $1 AND numero_whatsapp = $2 
+         ORDER BY created_at ASC`,
+        [user.cliente_id, numero]
+      )
+      return NextResponse.json(mensajes)
     }
 
-    const searchParams = request.nextUrl.searchParams
-    const busqueda = searchParams.get('q')
-    const canal = searchParams.get('canal')
-    const limite = parseInt(searchParams.get('limite') || '50')
-
-    let sql = `
-      SELECT 
-        numero_whatsapp,
-        nombre,
-        ultimo_mensaje,
-        ultimo_rol,
-        fecha_ultimo,
-        total_mensajes,
-        canal,
-        sin_leer,
-        asignado_a,
-        u.nombre as asignado_nombre
-      FROM (
-        SELECT 
-          m.numero_whatsapp,
-          COALESCE(l.nombre, m.numero_whatsapp) as nombre,
-          FIRST_VALUE(m.mensaje) OVER (PARTITION BY m.numero_whatsapp ORDER BY m.created_at DESC) as ultimo_mensaje,
-          FIRST_VALUE(m.rol) OVER (PARTITION BY m.numero_whatsapp ORDER BY m.created_at DESC) as ultimo_rol,
-          MAX(m.created_at) as fecha_ultimo,
-          COUNT(*) as total_mensajes,
-          COALESCE(m.canal, 'whatsapp') as canal,
-          SUM(CASE WHEN m.leido = false AND m.rol = 'user' THEN 1 ELSE 0 END) as sin_leer,
-          l.asignado_a
-        FROM mensajes m
-        LEFT JOIN leads l ON m.numero_whatsapp = l.telefono
-        WHERE m.cliente_id = $1
-        GROUP BY m.numero_whatsapp, l.nombre, m.canal, l.asignado_a, m.mensaje, m.rol, m.created_at
-      ) sub
-      LEFT JOIN usuarios u ON sub.asignado_a = u.id
-      WHERE 1=1
-    `
-    const params: any[] = [user.cliente_id || 1]
-
-    if (busqueda) {
-      params.push(`%${busqueda}%`)
-      sql += ` AND (nombre ILIKE $${params.length} OR numero_whatsapp ILIKE $${params.length})`
-    }
-
-    if (canal) {
-      params.push(canal)
-      sql += ` AND canal = $${params.length}`
-    }
-
-    sql += ` ORDER BY fecha_ultimo DESC LIMIT ${limite}`
-
-    const conversaciones = await query<Conversacion>(sql, params)
-
+    // Obtener lista de conversaciones
+    const conversaciones = await query(
+      `SELECT 
+        h.numero_whatsapp,
+        MAX(h.created_at) as ultimo_mensaje,
+        COUNT(*) as total_mensajes,
+        (SELECT mensaje FROM historial_conversaciones h2 
+         WHERE h2.numero_whatsapp = h.numero_whatsapp AND h2.cliente_id = h.cliente_id 
+         ORDER BY created_at DESC LIMIT 1) as ultimo_texto,
+        (SELECT rol FROM historial_conversaciones h2 
+         WHERE h2.numero_whatsapp = h.numero_whatsapp AND h2.cliente_id = h.cliente_id 
+         ORDER BY created_at DESC LIMIT 1) as ultimo_rol,
+        l.nombre as lead_nombre,
+        l.id as lead_id
+       FROM historial_conversaciones h
+       LEFT JOIN leads l ON l.telefono = h.numero_whatsapp AND l.cliente_id = h.cliente_id
+       WHERE h.cliente_id = $1
+       GROUP BY h.numero_whatsapp, h.cliente_id, l.nombre, l.id
+       ORDER BY MAX(h.created_at) DESC`,
+      [user.cliente_id]
+    )
     return NextResponse.json(conversaciones)
   } catch (error) {
-    console.error('Error fetching conversaciones:', error)
+    console.error('Error conversaciones:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
 }
