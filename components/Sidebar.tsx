@@ -1,4 +1,5 @@
 'use client'
+
 import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import ThemeToggle from './ThemeToggle'
@@ -40,6 +41,7 @@ export default function Sidebar({ user }: SidebarProps) {
 
   return (
     <aside className={`h-screen bg-[var(--sidebar-bg)] border-r border-[var(--border-color)] transition-all duration-300 flex-shrink-0 flex flex-col ${collapsed ? 'w-16' : 'w-56'}`}>
+      {/* Header */}
       <div className="h-14 flex items-center justify-between px-3 border-b border-[var(--border-color)]">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -52,44 +54,60 @@ export default function Sidebar({ user }: SidebarProps) {
             </div>
           )}
         </div>
-        <button onClick={() => setCollapsed(!collapsed)} className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] text-xs">
+        <button 
+          onClick={() => setCollapsed(!collapsed)} 
+          className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] text-xs"
+        >
           {collapsed ? '→' : '←'}
         </button>
       </div>
 
+      {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-2">
-        <ul className="space-y-0.5 px-2">
-          {visibleItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
-            return (
-              <li key={item.href}>
-                <button
-                  onClick={() => router.push(item.href)}
-                  className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg transition-colors ${
-                    isActive ? 'bg-green-500/20 text-green-500' : 'text-[var(--sidebar-text)] hover:bg-[var(--bg-hover)]'
-                  }`}
-                >
-                  <span className="text-lg flex-shrink-0">{item.icon}</span>
-                  {!collapsed && <span className="text-sm">{item.label}</span>}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+        {visibleItems.map((item) => {
+          const isActive = pathname === item.href
+          return (
+            <button
+              key={item.href}
+              onClick={() => router.push(item.href)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 mx-2 my-0.5 rounded-lg transition-all ${
+                isActive
+                  ? 'bg-emerald-600 text-white'
+                  : 'text-[var(--sidebar-text)] hover:bg-[var(--bg-hover)]'
+              } ${collapsed ? 'justify-center' : ''}`}
+              title={collapsed ? item.label : undefined}
+            >
+              <span className="text-lg">{item.icon}</span>
+              {!collapsed && <span className="text-sm">{item.label}</span>}
+            </button>
+          )
+        })}
       </nav>
 
-      <div className="p-2 border-t border-[var(--border-color)]">
-        {!collapsed && (
-          <div className="mb-2 px-2">
-            <p className="text-xs font-medium text-[var(--sidebar-text)] truncate">{user.nombre}</p>
-            <p className="text-[10px] text-[var(--text-muted)] truncate">{user.cliente_nombre || user.rol}</p>
+      {/* User section */}
+      <div className="border-t border-[var(--border-color)] p-3">
+        <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
+          <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white font-medium text-sm flex-shrink-0">
+            {user.nombre?.charAt(0).toUpperCase() || '?'}
           </div>
-        )}
-        <div className={`flex ${collapsed ? 'flex-col' : ''} gap-1`}>
-          <ThemeToggle className="flex-1" />
-          <button onClick={handleLogout} className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs" title="Cerrar sesión">
-            {collapsed ? '🚪' : 'Salir'}
-          </button>
+          {!collapsed && (
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-[var(--sidebar-text)] truncate">{user.nombre}</p>
+              <p className="text-xs text-[var(--text-muted)] truncate">{user.cliente_nombre || 'NipponFlex Ecuador'}</p>
+            </div>
+          )}
+        </div>
+        
+        <div className={`flex items-center mt-3 ${collapsed ? 'justify-center' : 'gap-2'}`}>
+          <ThemeToggle />
+          {!collapsed && (
+            <button
+              onClick={handleLogout}
+              className="flex-1 px-3 py-1.5 text-sm bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors"
+            >
+              Salir
+            </button>
+          )}
         </div>
       </div>
     </aside>

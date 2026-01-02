@@ -1,0 +1,527 @@
+{
+  "name": "NipponFlex WhatsApp Bot v3",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-nipponflex",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-800, 300],
+      "id": "1",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.body.data.key.fromMe }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "cond2",
+              "leftValue": "={{ $json.body.data.key.remoteJid }}",
+              "rightValue": "@g.us",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-600, 300],
+      "id": "2",
+      "name": "Filtrar"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mensajes_procesados (message_id, numero_whatsapp) SELECT '{{ $json.body.data.key.id }}', '{{ $json.body.data.key.remoteJid.replace(\"@s.whatsapp.net\", \"\") }}' WHERE NOT EXISTS (SELECT 1 FROM mensajes_procesados WHERE message_id = '{{ $json.body.data.key.id }}') RETURNING id",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-400, 300],
+      "id": "3",
+      "name": "Anti-Bucle",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "Kf5lv57JCpqgROvy",
+          "name": "PostgreSQL NipponFlex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-200, 300],
+      "id": "4",
+      "name": "Es Nuevo?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhook = $('Webhook').first().json;\nconst msg = webhook.body.data.message;\n\nlet tipo = 'texto';\nlet contenido = '';\n\nif (msg.audioMessage) {\n  tipo = 'audio';\n  contenido = '[Audio recibido]';\n} else if (msg.conversation) {\n  contenido = msg.conversation;\n} else if (msg.extendedTextMessage && msg.extendedTextMessage.text) {\n  contenido = msg.extendedTextMessage.text;\n} else if (msg.imageMessage) {\n  tipo = 'imagen';\n  contenido = msg.imageMessage.caption || '[Imagen recibida]';\n} else if (msg.documentMessage) {\n  tipo = 'documento';\n  contenido = '[Documento: ' + (msg.documentMessage.fileName || 'archivo') + ']';\n} else {\n  contenido = '[Mensaje no soportado]';\n}\n\nreturn {\n  tipo: tipo,\n  contenido: contenido,\n  instance: webhook.body.instance,\n  numero: webhook.body.data.key.remoteJid.replace('@s.whatsapp.net', ''),\n  pushName: webhook.body.data.pushName || 'Sin nombre',\n  messageId: webhook.body.data.key.id\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "id": "5",
+      "name": "Detectar Tipo"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "audio",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "id": "6",
+      "name": "Es Audio?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evolution-api-nipponflex.84.247.166.88.sslip.io/chat/getBase64FromMediaMessage/{{ $('Detectar Tipo').item.json.instance }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {\n    \"key\": {\n      \"id\": \"{{ $('Detectar Tipo').item.json.messageId }}\"\n    }\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 200],
+      "id": "7",
+      "name": "Descargar Audio",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5WIJYVFXsILBXAtm",
+          "name": "whatsapp_nipponflex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const audioData = $('Descargar Audio').first().json;\nconst detectar = $('Detectar Tipo').first().json;\n\nconst base64Audio = audioData.base64;\nconst mimeType = audioData.mimetype || 'audio/ogg';\n\n// Crear el binary data para n8n\nconst binaryData = Buffer.from(base64Audio, 'base64');\n\nreturn {\n  json: {\n    instance: detectar.instance,\n    numero: detectar.numero,\n    pushName: detectar.pushName,\n    mimeType: mimeType\n  },\n  binary: {\n    audio: {\n      data: base64Audio,\n      mimeType: mimeType,\n      fileName: 'audio.ogg'\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 200],
+      "id": "8",
+      "name": "Preparar Audio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "whisper-large-v3"
+            },
+            {
+              "name": "language",
+              "value": "es"
+            }
+          ]
+        },
+        "sendBinaryData": true,
+        "binaryPropertyName": "audio",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 200],
+      "id": "9",
+      "name": "Whisper Transcribir",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "JBYWSgiPeDOnBgzw",
+          "name": "groq_nipponflex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let contenido = '';\nlet detectar = $('Detectar Tipo').first().json;\n\n// Si es audio, intentar obtener la transcripción\nif (detectar.tipo === 'audio') {\n  try {\n    const whisper = $('Whisper Transcribir').first().json;\n    contenido = whisper.text || '[No se pudo transcribir el audio]';\n  } catch(e) {\n    contenido = '[Error al transcribir audio]';\n  }\n} else {\n  contenido = detectar.contenido;\n}\n\nreturn {\n  contenido: contenido,\n  tipo: detectar.tipo,\n  instance: detectar.instance,\n  numero: detectar.numero,\n  pushName: detectar.pushName\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "id": "10",
+      "name": "Unificar Mensaje"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.id as cliente_id, c.api_key_groq, ca.id as agente_id, ca.nombre_agente, ca.nombre_custom, ca.prompt_sistema, ca.temperatura, ca.max_tokens, ca.horario_inicio, ca.horario_fin, ca.mensaje_fuera_horario, ta.nombre as tipo_agente FROM clientes c JOIN configuracion_agente ca ON c.id = ca.cliente_id AND ca.activo = true LEFT JOIN tipos_agente ta ON ca.tipo_agente_id = ta.id WHERE c.evolution_instance = '{{ $('Unificar Mensaje').item.json.instance }}' LIMIT 1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1200, 300],
+      "id": "11",
+      "name": "Cargar Config",
+      "credentials": {
+        "postgres": {
+          "id": "Kf5lv57JCpqgROvy",
+          "name": "PostgreSQL NipponFlex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(contenido_texto, contenido, '') as contenido FROM conocimientos WHERE agente_id = {{ $('Cargar Config').item.json.agente_id }} AND activo = true LIMIT 5",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1400, 300],
+      "id": "12",
+      "name": "Cargar Conocimientos",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "Kf5lv57JCpqgROvy",
+          "name": "PostgreSQL NipponFlex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT rol, mensaje FROM historial_conversaciones WHERE numero_whatsapp = '{{ $('Unificar Mensaje').item.json.numero }}' AND cliente_id = {{ $('Cargar Config').item.json.cliente_id }} ORDER BY created_at DESC LIMIT 10",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1600, 300],
+      "id": "13",
+      "name": "Cargar Historial",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "Kf5lv57JCpqgROvy",
+          "name": "PostgreSQL NipponFlex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Cargar Config').first().json;\nconst mensaje = $('Unificar Mensaje').first().json;\nconst historial = $('Cargar Historial').all().map(i => i.json);\nconst conocimientos = $('Cargar Conocimientos').all().map(i => i.json.contenido).filter(c => c && c.trim()).join('\\n\\n---\\n\\n');\n\nconst ahora = new Date();\nconst fechaActual = ahora.toLocaleDateString('es-EC', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\nconst horaActualStr = ahora.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' });\n\nlet promptSistema = '';\nconst nombreAgente = config.nombre_custom || config.nombre_agente || 'Asistente';\nif (nombreAgente !== 'Asistente') {\n  promptSistema = 'Tu nombre es ' + nombreAgente + '. ';\n}\n\npromptSistema += config.prompt_sistema || 'Eres un asistente amigable.';\npromptSistema += '\\n\\nFecha actual: ' + fechaActual + ' a las ' + horaActualStr;\n\nif (config.tipo_agente && ['Ventas', 'Citas', 'Salud/Clinica', 'Inmobiliaria'].includes(config.tipo_agente)) {\n  promptSistema += '\\n\\n=== PARA AGENDAR CITAS ===\\nSi el usuario quiere agendar cita/reunion/llamada:\\n1. Pregunta fecha y hora\\n2. Confirma datos\\n3. Responde con:\\n[AGENDAR_CITA]\\nfecha: YYYY-MM-DD\\nhora: HH:MM\\ntipo: cita|llamada|reunion\\ntitulo: descripcion\\n[/AGENDAR_CITA]\\n=== FIN ===';\n}\n\nif (conocimientos && conocimientos.length > 50) {\n  promptSistema += '\\n\\n=== BASE DE CONOCIMIENTOS ===\\n' + conocimientos + '\\n=== FIN ===\\n\\nIMPORTANTE: Usa SOLO los precios del catalogo. NO inventes precios.';\n}\n\nconst messages = [{ role: 'system', content: promptSistema }];\n\nif (historial.length > 0) {\n  const hist = historial.reverse();\n  for (const m of hist) {\n    if (m.mensaje) {\n      messages.push({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.mensaje });\n    }\n  }\n}\n\nmessages.push({ role: 'user', content: mensaje.contenido });\n\nreturn {\n  messages: messages,\n  temperatura: parseFloat(config.temperatura) || 0.7,\n  max_tokens: parseInt(config.max_tokens) || 300,\n  cliente_id: config.cliente_id,\n  instance: mensaje.instance,\n  numero: mensaje.numero,\n  pushName: mensaje.pushName,\n  mensajeOriginal: mensaje.contenido\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 300],
+      "id": "14",
+      "name": "Construir Prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": {{ JSON.stringify($json.messages) }},\n  \"temperature\": {{ $json.temperatura }},\n  \"max_tokens\": {{ $json.max_tokens }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 300],
+      "id": "15",
+      "name": "Groq AI",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "JBYWSgiPeDOnBgzw",
+          "name": "groq_nipponflex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const respuestaIA = $('Groq AI').first().json.choices[0].message.content;\nconst datos = $('Construir Prompt').first().json;\n\nconst regexCita = /\\[AGENDAR_CITA\\]([\\s\\S]*?)\\[\\/AGENDAR_CITA\\]/;\nconst match = respuestaIA.match(regexCita);\n\nlet agendarCita = false;\nlet datosCita = {};\nlet mensajeLimpio = respuestaIA;\n\nif (match) {\n  agendarCita = true;\n  const bloque = match[1];\n  const fechaM = bloque.match(/fecha:\\s*(\\d{4}-\\d{2}-\\d{2})/);\n  const horaM = bloque.match(/hora:\\s*(\\d{2}:\\d{2})/);\n  const tipoM = bloque.match(/tipo:\\s*(\\w+)/);\n  const tituloM = bloque.match(/titulo:\\s*(.+)/);\n  \n  if (fechaM && horaM) {\n    datosCita = {\n      fecha_inicio: fechaM[1] + 'T' + horaM[1] + ':00',\n      tipo: tipoM ? tipoM[1] : 'cita',\n      titulo: tituloM ? tituloM[1].trim() : 'Cita con ' + datos.pushName\n    };\n  }\n  mensajeLimpio = respuestaIA.replace(regexCita, '').trim();\n}\n\nreturn {\n  respuestaIA: mensajeLimpio,\n  agendarCita: agendarCita,\n  datosCita: datosCita,\n  cliente_id: datos.cliente_id,\n  instance: datos.instance,\n  numero: datos.numero,\n  pushName: datos.pushName,\n  mensajeOriginal: datos.mensajeOriginal\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 300],
+      "id": "16",
+      "name": "Procesar Respuesta"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.agendarCita }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2400, 300],
+      "id": "17",
+      "name": "Hay Cita?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO citas (cuenta_id, cliente_id, titulo, descripcion, tipo, fecha_inicio, fecha_fin, color, estado, notas, created_at) VALUES (1, {{ $json.cliente_id }}, '{{ $json.datosCita.titulo }}', 'Via WhatsApp - {{ $json.pushName }}', '{{ $json.datosCita.tipo }}', '{{ $json.datosCita.fecha_inicio }}', '{{ $json.datosCita.fecha_inicio }}', '#22c55e', 'pendiente', 'Tel: {{ $json.numero }}', NOW())",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2600, 200],
+      "id": "18",
+      "name": "Crear Cita",
+      "credentials": {
+        "postgres": {
+          "id": "Kf5lv57JCpqgROvy",
+          "name": "PostgreSQL NipponFlex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2800, 300],
+      "id": "19",
+      "name": "Delay"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evolution-api-nipponflex.84.247.166.88.sslip.io/message/sendText/{{ $('Procesar Respuesta').item.json.instance }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $('Procesar Respuesta').item.json.numero }}\",\n  \"text\": {{ JSON.stringify($('Procesar Respuesta').item.json.respuestaIA) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3000, 300],
+      "id": "20",
+      "name": "Enviar WhatsApp",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5WIJYVFXsILBXAtm",
+          "name": "whatsapp_nipponflex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje) VALUES ({{ $('Procesar Respuesta').item.json.cliente_id }}, '{{ $('Procesar Respuesta').item.json.numero }}', 'user', '{{ $('Procesar Respuesta').item.json.mensajeOriginal }}')",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3200, 200],
+      "id": "21",
+      "name": "Guardar User",
+      "credentials": {
+        "postgres": {
+          "id": "Kf5lv57JCpqgROvy",
+          "name": "PostgreSQL NipponFlex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje) VALUES ({{ $('Procesar Respuesta').item.json.cliente_id }}, '{{ $('Procesar Respuesta').item.json.numero }}', 'assistant', '{{ $('Procesar Respuesta').item.json.respuestaIA }}')",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3200, 300],
+      "id": "22",
+      "name": "Guardar Bot",
+      "credentials": {
+        "postgres": {
+          "id": "Kf5lv57JCpqgROvy",
+          "name": "PostgreSQL NipponFlex"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO leads (cuenta_id, cliente_id, nombre, telefono, origen, ultima_interaccion, total_mensajes, etapa_id) VALUES (1, {{ $('Procesar Respuesta').item.json.cliente_id }}, '{{ $('Procesar Respuesta').item.json.pushName }}', '{{ $('Procesar Respuesta').item.json.numero }}', 'whatsapp', NOW(), 1, (SELECT id FROM etapas_crm WHERE cuenta_id = 1 AND orden = 1 LIMIT 1)) ON CONFLICT (cliente_id, telefono) DO UPDATE SET ultima_interaccion = NOW(), total_mensajes = leads.total_mensajes + 1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3200, 400],
+      "id": "23",
+      "name": "Guardar Lead",
+      "credentials": {
+        "postgres": {
+          "id": "Kf5lv57JCpqgROvy",
+          "name": "PostgreSQL NipponFlex"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Filtrar", "type": "main", "index": 0}]]
+    },
+    "Filtrar": {
+      "main": [[{"node": "Anti-Bucle", "type": "main", "index": 0}]]
+    },
+    "Anti-Bucle": {
+      "main": [[{"node": "Es Nuevo?", "type": "main", "index": 0}]]
+    },
+    "Es Nuevo?": {
+      "main": [[{"node": "Detectar Tipo", "type": "main", "index": 0}]]
+    },
+    "Detectar Tipo": {
+      "main": [[{"node": "Es Audio?", "type": "main", "index": 0}]]
+    },
+    "Es Audio?": {
+      "main": [
+        [{"node": "Descargar Audio", "type": "main", "index": 0}],
+        [{"node": "Unificar Mensaje", "type": "main", "index": 0}]
+      ]
+    },
+    "Descargar Audio": {
+      "main": [[{"node": "Preparar Audio", "type": "main", "index": 0}]]
+    },
+    "Preparar Audio": {
+      "main": [[{"node": "Whisper Transcribir", "type": "main", "index": 0}]]
+    },
+    "Whisper Transcribir": {
+      "main": [[{"node": "Unificar Mensaje", "type": "main", "index": 0}]]
+    },
+    "Unificar Mensaje": {
+      "main": [[{"node": "Cargar Config", "type": "main", "index": 0}]]
+    },
+    "Cargar Config": {
+      "main": [[{"node": "Cargar Conocimientos", "type": "main", "index": 0}]]
+    },
+    "Cargar Conocimientos": {
+      "main": [[{"node": "Cargar Historial", "type": "main", "index": 0}]]
+    },
+    "Cargar Historial": {
+      "main": [[{"node": "Construir Prompt", "type": "main", "index": 0}]]
+    },
+    "Construir Prompt": {
+      "main": [[{"node": "Groq AI", "type": "main", "index": 0}]]
+    },
+    "Groq AI": {
+      "main": [[{"node": "Procesar Respuesta", "type": "main", "index": 0}]]
+    },
+    "Procesar Respuesta": {
+      "main": [[{"node": "Hay Cita?", "type": "main", "index": 0}]]
+    },
+    "Hay Cita?": {
+      "main": [
+        [{"node": "Crear Cita", "type": "main", "index": 0}],
+        [{"node": "Delay", "type": "main", "index": 0}]
+      ]
+    },
+    "Crear Cita": {
+      "main": [[{"node": "Delay", "type": "main", "index": 0}]]
+    },
+    "Delay": {
+      "main": [[{"node": "Enviar WhatsApp", "type": "main", "index": 0}]]
+    },
+    "Enviar WhatsApp": {
+      "main": [[
+        {"node": "Guardar User", "type": "main", "index": 0},
+        {"node": "Guardar Bot", "type": "main", "index": 0},
+        {"node": "Guardar Lead", "type": "main", "index": 0}
+      ]]
+    }
+  },
+  "pinData": {}
+}
