@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
     
     const procesados: any[] = []
     const errores: any[] = []
+    const bloqueados: any[] = []
 
     const mensajes = await query(`
       SELECT cm.*, iw.evolution_instance, iw.evolution_api_key
@@ -31,20 +32,78 @@ export async function POST(request: NextRequest) {
 
     for (const msg of mensajes as any[]) {
       try {
+        // Verificar límite del cliente antes de enviar
+        const cliente = await queryOne(`
+          SELECT id, limite_mensajes_mes, mensajes_usados_mes, 
+                 alerta_80_enviada, alerta_100_enviada, plan
+          FROM clientes WHERE id = $1
+        `, [msg.cliente_id])
+
+        if (cliente) {
+          const limiteMes = cliente.limite_mensajes_mes || 500
+          const usadoMes = cliente.mensajes_usados_mes || 0
+
+          // Si excede límite, marcar como error y no enviar
+          if (usadoMes >= limiteMes) {
+            await query(`
+              UPDATE cola_mensajes 
+              SET estado = 'error', error_mensaje = 'Límite mensual alcanzado' 
+              WHERE id = $1
+            `, [msg.id])
+            
+            bloqueados.push({ id: msg.id, cliente_id: msg.cliente_id, razon: 'limite_alcanzado' })
+            
+            // Crear alerta si no existe
+            if (!cliente.alerta_100_enviada) {
+              await query(`
+                INSERT INTO alertas_uso (cliente_id, tipo, porcentaje, mensaje)
+                VALUES ($1, 'limite', 100, 'Límite de mensajes alcanzado. Actualiza tu plan.')
+              `, [msg.cliente_id])
+              await query(`UPDATE clientes SET alerta_100_enviada = true WHERE id = $1`, [msg.cliente_id])
+            }
+            continue
+          }
+
+          // Alerta al 80%
+          const porcentaje = Math.round(((usadoMes + 1) / limiteMes) * 100)
+          if (porcentaje >= 80 && !cliente.alerta_80_enviada) {
+            await query(`
+              INSERT INTO alertas_uso (cliente_id, tipo, porcentaje, mensaje)
+              VALUES ($1, 'advertencia', 80, $2)
+            `, [msg.cliente_id, `Has usado 80% de tus mensajes (${usadoMes}/${limiteMes})`])
+            await query(`UPDATE clientes SET alerta_80_enviada = true WHERE id = $1`, [msg.cliente_id])
+          }
+        }
+
+        // Marcar como procesando
         await query(`UPDATE cola_mensajes SET estado = 'procesando', intentos = intentos + 1 WHERE id = $1`, [msg.id])
 
+        // Enviar mensaje
         const enviado = await enviarMensaje(msg)
 
         if (enviado.success) {
           await query(`UPDATE cola_mensajes SET estado = 'enviado', enviado_at = NOW() WHERE id = $1`, [msg.id])
           
+          // Actualizar contadores
           if (msg.instancia_id) {
             await query(`UPDATE instancias_whatsapp SET mensajes_dia_enviados = mensajes_dia_enviados + 1 WHERE id = $1`, [msg.instancia_id])
           }
+          
+          // Actualizar contador mensual del cliente
+          await query(`UPDATE clientes SET mensajes_usados_mes = COALESCE(mensajes_usados_mes, 0) + 1 WHERE id = $1`, [msg.cliente_id])
 
+          // Actualizar contacto de campaña si aplica
           if (msg.campania_contacto_id) {
             await query(`UPDATE campania_contactos SET estado = 'enviado', enviado_at = NOW() WHERE id = $1`, [msg.campania_contacto_id])
           }
+
+          // Actualizar métricas
+          await query(`
+            INSERT INTO metricas_realtime (cliente_id, instancia_id, fecha, hora, mensajes_enviados)
+            VALUES ($1, $2, CURRENT_DATE, EXTRACT(HOUR FROM NOW()), 1)
+            ON CONFLICT (cliente_id, instancia_id, fecha, hora)
+            DO UPDATE SET mensajes_enviados = metricas_realtime.mensajes_enviados + 1
+          `, [msg.cliente_id, msg.instancia_id])
 
           procesados.push({ id: msg.id, numero: msg.numero_destino })
         } else {
@@ -61,7 +120,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ procesados: procesados.length, errores: errores.length, detalles: { procesados, errores } })
+    return NextResponse.json({ 
+      procesados: procesados.length, 
+      errores: errores.length,
+      bloqueados: bloqueados.length,
+      detalles: { procesados, errores, bloqueados } 
+    })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
