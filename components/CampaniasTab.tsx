@@ -202,9 +202,21 @@ export default function CampaniasTab() {
   }
 
   const loadLeadsDisponibles = async () => {
-    const res = await fetch('/api/leads?limit=500')
-    const data = await res.json()
-    setLeadsDisponibles(Array.isArray(data) ? data : (data.leads || []))
+    try {
+      const res = await fetch('/api/leads?limit=500')
+      const data = await res.json()
+      console.log('Leads response:', data)
+      if (data.error) {
+        console.error('Error cargando leads:', data.error)
+        setLeadsDisponibles([])
+        return
+      }
+      const leads = Array.isArray(data) ? data : (data.leads || [])
+      setLeadsDisponibles(leads)
+    } catch (e) {
+      console.error('Error fetch leads:', e)
+      setLeadsDisponibles([])
+    }
   }
 
   const loadCampaniaContactos = async (campaniaId: number) => {
@@ -824,7 +836,7 @@ export default function CampaniasTab() {
                           className="rounded" />
                         <div className="flex-1">
                           <div className="text-sm text-[var(--text-primary)]">{lead.nombre || 'Sin nombre'}</div>
-                          <div className="text-xs text-[var(--text-tertiary)]">{lead.telefono}</div>
+                          <div className="text-xs text-[var(--text-tertiary)]">{lead.numero_whatsapp || lead.telefono}</div>
                         </div>
                       </label>
                     ))}
