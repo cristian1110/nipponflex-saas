@@ -131,6 +131,7 @@ export default function CampaniasTab() {
   const [campanias, setCampanias] = useState<Campania[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [showContactos, setShowContactos] = useState(false)
   const [showImportar, setShowImportar] = useState(false)
   const [showPlantillasMsg, setShowPlantillasMsg] = useState(false)
@@ -254,29 +255,6 @@ export default function CampaniasTab() {
     setShowPlantillasMsg(false)
   }
 
-  const crearCampania = async () => {
-    if (!formData.nombre || !formData.mensaje_plantilla || !formData.pipeline_id) {
-      alert('Completa: Nombre, Mensaje y Pipeline')
-      return
-    }
-    if (formData.dias_semana.length === 0) {
-      alert('Selecciona al menos un día de la semana')
-      return
-    }
-    try {
-      const dataToSend = {
-        ...formData,
-        dias_semana: formData.dias_semana.join(',') // Convertir array a string "1,2,3,4,5"
-      }
-      const res = await fetch('/api/campanias', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dataToSend)
-      })
-      if (res.ok) { setShowModal(false); resetForm(); loadCampanias() }
-    } catch (e) { console.error(e) }
-  }
-
   const cambiarEstado = async (campaniaId: number, nuevoEstado: string) => {
     try {
       const res = await fetch('/api/campanias/estado', {
@@ -290,9 +268,67 @@ export default function CampaniasTab() {
   }
 
   const eliminarCampania = async (id: number) => {
-    if (!confirm('¿Eliminar esta campaña?')) return
+    if (!confirm('¿Eliminar esta campaña y todos sus contactos?')) return
     await fetch(`/api/campanias?id=${id}`, { method: 'DELETE' })
     loadCampanias()
+  }
+
+  const editarCampania = async (campania: Campania) => {
+    setEditingId(campania.id)
+    setFormData({
+      nombre: campania.nombre || '',
+      descripcion: campania.descripcion || '',
+      mensaje_plantilla: campania.mensaje_plantilla || '',
+      mensaje_seguimiento: campania.mensaje_seguimiento || '',
+      pipeline_id: campania.pipeline_id || 0,
+      etapa_inicial_id: campania.etapa_inicial_id || 0,
+      agente_id: campania.agente_id || 0,
+      horario_inicio: campania.horario_inicio || '09:00',
+      horario_fin: campania.horario_fin || '18:00',
+      dias_semana: campania.dias_semana ? campania.dias_semana.split(',') : ['1', '2', '3', '4', '5'],
+      delay_min: campania.delay_min || 30,
+      delay_max: campania.delay_max || 90,
+      contactos_por_dia: campania.contactos_por_dia || 20,
+      dias_sin_respuesta: 3,
+      max_seguimientos: 2
+    })
+    if (campania.pipeline_id) {
+      await loadEtapas(campania.pipeline_id)
+    }
+    setShowModal(true)
+  }
+
+  const guardarCampania = async () => {
+    if (!formData.nombre || !formData.mensaje_plantilla || !formData.pipeline_id) {
+      alert('Completa: Nombre, Mensaje y Pipeline')
+      return
+    }
+    if (formData.dias_semana.length === 0) {
+      alert('Selecciona al menos un día de la semana')
+      return
+    }
+    try {
+      const dataToSend = {
+        ...formData,
+        dias_semana: formData.dias_semana.join(','),
+        ...(editingId && { id: editingId })
+      }
+
+      const res = await fetch('/api/campanias', {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dataToSend)
+      })
+      if (res.ok) {
+        setShowModal(false)
+        setEditingId(null)
+        resetForm()
+        loadCampanias()
+      } else {
+        const error = await res.json()
+        alert(error.error || 'Error al guardar')
+      }
+    } catch (e) { console.error(e) }
   }
 
   const importarLeads = async () => {
@@ -479,25 +515,31 @@ export default function CampaniasTab() {
                   className="px-3 py-1.5 bg-[var(--bg-primary)] text-[var(--text-primary)] rounded text-xs border border-[var(--border-color)]">
                   👥 Ver Contactos
                 </button>
-                {c.estado === 'borrador' && (
+                <div className="flex gap-2 ml-auto">
+                  <button onClick={() => editarCampania(c)}
+                    className="px-3 py-1.5 bg-blue-500/20 text-blue-400 rounded text-xs hover:bg-blue-500/30"
+                    title="Editar campaña">
+                    ✏️ Editar
+                  </button>
                   <button onClick={() => eliminarCampania(c.id)}
-                    className="px-3 py-1.5 bg-red-500/20 text-red-400 rounded text-xs ml-auto">
+                    className="px-3 py-1.5 bg-red-500/20 text-red-400 rounded text-xs hover:bg-red-500/30"
+                    title="Eliminar campaña">
                     🗑️
                   </button>
-                )}
+                </div>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Modal Nueva Campaña */}
+      {/* Modal Nueva/Editar Campaña */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-[var(--bg-secondary)] rounded-xl w-full max-w-2xl my-4">
             <div className="p-4 border-b border-[var(--border-color)] flex justify-between items-center">
-              <h3 className="font-bold text-[var(--text-primary)]">Nueva Campaña</h3>
-              <button onClick={() => { setShowModal(false); resetForm() }} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xl">✕</button>
+              <h3 className="font-bold text-[var(--text-primary)]">{editingId ? 'Editar Campaña' : 'Nueva Campaña'}</h3>
+              <button onClick={() => { setShowModal(false); setEditingId(null); resetForm() }} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xl">✕</button>
             </div>
             
             <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
@@ -658,14 +700,14 @@ export default function CampaniasTab() {
             </div>
 
             <div className="p-4 border-t border-[var(--border-color)] flex gap-2">
-              <button onClick={() => { setShowModal(false); resetForm() }}
+              <button onClick={() => { setShowModal(false); setEditingId(null); resetForm() }}
                 className="flex-1 px-4 py-2 border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]">
                 Cancelar
               </button>
-              <button onClick={crearCampania}
+              <button onClick={guardarCampania}
                 disabled={!formData.nombre || !formData.mensaje_plantilla || !formData.pipeline_id || formData.dias_semana.length === 0}
                 className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50">
-                Crear Campaña
+                {editingId ? 'Guardar Cambios' : 'Crear Campaña'}
               </button>
             </div>
           </div>

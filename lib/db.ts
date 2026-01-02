@@ -26,4 +26,14 @@ export async function queryOne(text: string, params?: any[]): Promise<any | null
   return rows[0] || null
 }
 
+export async function execute(text: string, params?: any[]): Promise<number> {
+  const client = await pool.connect()
+  try {
+    const result = await client.query(text, params)
+    return result.rowCount || 0
+  } finally {
+    client.release()
+  }
+}
+
 export default pool
