@@ -58,9 +58,14 @@ export async function POST(request: NextRequest) {
 
         for (let i = 0; i < contactosPendientes.length; i++) {
           const contacto = contactosPendientes[i] as any
-          const delaySegundos = i * ((campania.delay_min || 30) + Math.random() * ((campania.delay_max || 90) - (campania.delay_min || 30)))
 
-          const programadoPara = new Date(ahora.getTime() + delaySegundos * 1000)
+          // Delay más natural: base + variación aleatoria por cada contacto
+          const delayMin = campania.delay_min || 60  // mínimo 1 minuto entre mensajes
+          const delayMax = campania.delay_max || 180 // máximo 3 minutos
+          const delayBase = delayMin + Math.random() * (delayMax - delayMin)
+          const delayAcumulado = i * delayBase + Math.random() * 30 // +0-30 seg variación extra
+
+          const programadoPara = new Date(ahora.getTime() + delayAcumulado * 1000)
           const mensaje = (campania.mensaje_plantilla || '')
             .replace(/\[NOMBRE\]/gi, contacto.nombre || 'Hola')
             .replace(/\[EMPRESA\]/gi, contacto.empresa || '')
