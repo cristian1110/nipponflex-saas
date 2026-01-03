@@ -22,6 +22,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Campaña no encontrada' }, { status: 404 })
     }
 
+    // DEBUG: Ver qué campos tiene la campaña
+    console.log('DEBUG Campaña:', {
+      id: campania.id,
+      tipo_media: campania.tipo_media,
+      tiene_media_url: !!campania.media_url,
+      tiene_media_base64: !!campania.media_base64,
+      media_mimetype: campania.media_mimetype
+    })
+
     const instancia = await queryOne(`
       SELECT * FROM instancias_whatsapp 
       WHERE cliente_id = $1 AND estado = 'conectado' 

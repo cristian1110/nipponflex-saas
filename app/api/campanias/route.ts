@@ -155,6 +155,13 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'ID requerido' }, { status: 400 })
     }
 
+    // Primero eliminar contactos de la campaña
+    await query('DELETE FROM campania_contactos WHERE campania_id = $1', [id])
+
+    // Luego eliminar mensajes en cola
+    await query('DELETE FROM cola_mensajes WHERE campania_id = $1', [id])
+
+    // Finalmente eliminar la campaña
     await query('DELETE FROM campanias WHERE id = $1 AND cliente_id = $2', [id, user.cliente_id])
 
     return NextResponse.json({ success: true })

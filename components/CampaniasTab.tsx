@@ -26,6 +26,11 @@ interface Campania {
   enviados_count: number
   respondidos_count: number
   created_at: string
+  // Campos multimedia
+  tipo_media: string
+  media_url: string
+  media_base64: string
+  media_mimetype: string
 }
 
 interface Pipeline { id: number; nombre: string }
@@ -161,7 +166,12 @@ export default function CampaniasTab() {
     delay_max: 90,
     contactos_por_dia: 20,
     dias_sin_respuesta: 3,
-    max_seguimientos: 2
+    max_seguimientos: 2,
+    // Campos multimedia
+    tipo_media: 'texto',
+    media_url: '',
+    media_base64: '',
+    media_mimetype: ''
   })
 
   const [importMode, setImportMode] = useState<'csv' | 'leads'>('leads')
@@ -334,7 +344,11 @@ export default function CampaniasTab() {
       delay_max: campania.delay_max || 90,
       contactos_por_dia: campania.contactos_por_dia || 20,
       dias_sin_respuesta: 3,
-      max_seguimientos: 2
+      max_seguimientos: 2,
+      tipo_media: campania.tipo_media || 'texto',
+      media_url: campania.media_url || '',
+      media_base64: campania.media_base64 || '',
+      media_mimetype: campania.media_mimetype || ''
     })
     if (campania.pipeline_id) {
       await loadEtapas(campania.pipeline_id)
@@ -343,8 +357,14 @@ export default function CampaniasTab() {
   }
 
   const guardarCampania = async () => {
-    if (!formData.nombre || !formData.mensaje_plantilla || !formData.pipeline_id) {
-      alert('Completa: Nombre, Mensaje y Pipeline')
+    if (!formData.nombre || !formData.pipeline_id) {
+      alert('Completa: Nombre y Pipeline')
+      return
+    }
+    // Validar que tenga contenido (mensaje o media)
+    const tieneMedia = formData.media_url || formData.media_base64
+    if (!formData.mensaje_plantilla && !tieneMedia) {
+      alert('Agrega un mensaje o una imagen/audio')
       return
     }
     if (formData.dias_semana.length === 0) {
@@ -355,6 +375,10 @@ export default function CampaniasTab() {
       const dataToSend = {
         ...formData,
         dias_semana: formData.dias_semana.join(','),
+        tipo_media: formData.tipo_media,
+        media_url: formData.media_url || null,
+        media_base64: formData.media_base64 || null,
+        media_mimetype: formData.media_mimetype || null,
         ...(editingId && { id: editingId })
       }
 
@@ -414,7 +438,8 @@ export default function CampaniasTab() {
       nombre: '', descripcion: '', mensaje_plantilla: '', mensaje_seguimiento: '',
       pipeline_id: 0, etapa_inicial_id: 0, agente_id: 0,
       horario_inicio: '09:00', horario_fin: '18:00', dias_semana: ['1', '2', '3', '4', '5'],
-      delay_min: 30, delay_max: 90, contactos_por_dia: 20, dias_sin_respuesta: 3, max_seguimientos: 2
+      delay_min: 30, delay_max: 90, contactos_por_dia: 20, dias_sin_respuesta: 3, max_seguimientos: 2,
+      tipo_media: 'texto', media_url: '', media_base64: '', media_mimetype: ''
     })
     setEtapas([])
   }
@@ -683,10 +708,120 @@ export default function CampaniasTab() {
                 </div>
               </div>
 
+              {/* Tipo de contenido */}
+              <div>
+                <label className="block text-sm text-[var(--text-secondary)] mb-2">Tipo de contenido</label>
+                <div className="flex gap-2">
+                  {[
+                    { id: 'texto', icon: '📝', label: 'Solo texto' },
+                    { id: 'imagen', icon: '🖼️', label: 'Imagen + texto' },
+                    { id: 'audio', icon: '🎵', label: 'Audio' }
+                  ].map(tipo => (
+                    <button
+                      key={tipo.id}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, tipo_media: tipo.id, media_url: '', media_base64: '' })}
+                      className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                        formData.tipo_media === tipo.id
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
+                      }`}
+                    >
+                      {tipo.icon} {tipo.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Upload de imagen/audio */}
+              {formData.tipo_media !== 'texto' && (
+                <div className="bg-[var(--bg-primary)] rounded-lg p-4">
+                  <label className="block text-sm text-[var(--text-secondary)] mb-2">
+                    {formData.tipo_media === 'imagen' ? '🖼️ Imagen' : '🎵 Audio'}
+                  </label>
+
+                  {/* URL o Upload */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-[var(--text-tertiary)] mb-1">URL pública (recomendado)</label>
+                      <input
+                        type="url"
+                        value={formData.media_url}
+                        onChange={(e) => setFormData({ ...formData, media_url: e.target.value, media_base64: '' })}
+                        className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                        placeholder={formData.tipo_media === 'imagen' ? 'https://ejemplo.com/imagen.jpg' : 'https://ejemplo.com/audio.mp3'}
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-px bg-[var(--border-color)]"></div>
+                      <span className="text-xs text-[var(--text-tertiary)]">o</span>
+                      <div className="flex-1 h-px bg-[var(--border-color)]"></div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-[var(--text-tertiary)] mb-1">Subir archivo</label>
+                      <input
+                        type="file"
+                        accept={formData.tipo_media === 'imagen' ? 'image/*' : 'audio/*'}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) {
+                            const reader = new FileReader()
+                            reader.onloadend = () => {
+                              setFormData({
+                                ...formData,
+                                media_base64: reader.result as string,
+                                media_mimetype: file.type,
+                                media_url: ''
+                              })
+                            }
+                            reader.readAsDataURL(file)
+                          }
+                        }}
+                        className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-emerald-600 file:text-white file:cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Previsualización */}
+                  {(formData.media_url || formData.media_base64) && (
+                    <div className="mt-3 p-3 bg-[var(--bg-secondary)] rounded-lg">
+                      <p className="text-xs text-[var(--text-tertiary)] mb-2">Previsualización:</p>
+                      {formData.tipo_media === 'imagen' ? (
+                        <img
+                          src={formData.media_url || formData.media_base64}
+                          alt="Preview"
+                          className="max-h-40 rounded-lg object-contain"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none'
+                          }}
+                        />
+                      ) : (
+                        <audio
+                          src={formData.media_url || formData.media_base64}
+                          controls
+                          className="w-full"
+                        />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, media_url: '', media_base64: '', media_mimetype: '' })}
+                        className="mt-2 text-xs text-red-400 hover:underline"
+                      >
+                        ✕ Quitar {formData.tipo_media === 'imagen' ? 'imagen' : 'audio'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Mensaje Inicial */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-sm text-[var(--text-secondary)]">Mensaje inicial *</label>
+                  <label className="text-sm text-[var(--text-secondary)]">
+                    {formData.tipo_media === 'imagen' ? 'Texto de la imagen (caption)' : formData.tipo_media === 'audio' ? 'Mensaje de texto (opcional)' : 'Mensaje inicial *'}
+                  </label>
                   <div className="flex gap-2">
                     <button onClick={() => setShowAyudaVariables(true)}
                       className="px-2 py-1 text-xs bg-gray-600/20 text-gray-400 rounded hover:bg-gray-600/30">
@@ -805,7 +940,7 @@ export default function CampaniasTab() {
                 Cancelar
               </button>
               <button onClick={guardarCampania}
-                disabled={!formData.nombre || !formData.mensaje_plantilla || !formData.pipeline_id || formData.dias_semana.length === 0}
+                disabled={!formData.nombre || !formData.pipeline_id || formData.dias_semana.length === 0 || (!formData.mensaje_plantilla && !formData.media_url && !formData.media_base64)}
                 className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50">
                 {editingId ? 'Guardar Cambios' : 'Crear Campaña'}
               </button>

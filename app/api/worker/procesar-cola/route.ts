@@ -155,9 +155,12 @@ async function enviarMensaje(msg: any): Promise<{ success: boolean; error?: stri
       if (msg.media_url) {
         body.media = msg.media_url
       } else if (msg.media_base64) {
-        body.media = msg.media_base64.includes('base64,')
-          ? msg.media_base64
-          : `data:${msg.media_mimetype || 'image/jpeg'};base64,${msg.media_base64}`
+        // Evolution API espera base64 puro, sin el prefijo data:...
+        const base64Pure = msg.media_base64.includes('base64,')
+          ? msg.media_base64.split('base64,')[1]
+          : msg.media_base64
+        body.media = base64Pure
+        body.mimetype = msg.media_mimetype || 'image/jpeg'
       }
 
       const response = await fetch(`${evolutionUrl}/message/sendMedia/${evolutionInstance}`, {
@@ -180,9 +183,11 @@ async function enviarMensaje(msg: any): Promise<{ success: boolean; error?: stri
       if (msg.media_url) {
         body.audio = msg.media_url
       } else if (msg.media_base64) {
-        body.audio = msg.media_base64.includes('base64,')
-          ? msg.media_base64
-          : `data:${msg.media_mimetype || 'audio/ogg'};base64,${msg.media_base64}`
+        // Evolution API espera base64 puro
+        const base64Pure = msg.media_base64.includes('base64,')
+          ? msg.media_base64.split('base64,')[1]
+          : msg.media_base64
+        body.audio = base64Pure
       }
 
       const response = await fetch(`${evolutionUrl}/message/sendWhatsAppAudio/${evolutionInstance}`, {
