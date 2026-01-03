@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne, execute } from '@/lib/db'
-import { generarRespuestaIA, mapearModelo } from '@/lib/ai'
+import { generarRespuestaIA, mapearModelo, transcribirAudio, analizarImagen } from '@/lib/ai'
 import { enviarMensajeWhatsApp, enviarPresencia } from '@/lib/evolution'
 import {
   getPromptCitas,
@@ -9,6 +9,7 @@ import {
   crearCitaDesdeIA
 } from '@/lib/citas-ia'
 import { buscarContextoRelevante, construirPromptConRAG } from '@/lib/rag'
+import { descargarMedia, base64ToBuffer, esAudioCompatible, esImagenCompatible } from '@/lib/media'
 
 // Webhook para recibir mensajes de Evolution API
 export async function POST(request: NextRequest) {
@@ -42,17 +43,28 @@ export async function POST(request: NextRequest) {
     // Extraer contenido del mensaje
     let texto = ''
     let tipo = 'text'
+    let mediaInfo: { base64: string; mimetype: string } | null = null
+    const messageId = data.key?.id
 
     if (message.conversation) {
       texto = message.conversation
     } else if (message.extendedTextMessage?.text) {
       texto = message.extendedTextMessage.text
     } else if (message.imageMessage) {
-      texto = message.imageMessage.caption || '[Imagen recibida]'
+      texto = message.imageMessage.caption || ''
       tipo = 'image'
+      // Guardar info para procesar después
+      mediaInfo = {
+        base64: message.imageMessage.base64 || '',
+        mimetype: message.imageMessage.mimetype || 'image/jpeg',
+      }
     } else if (message.audioMessage) {
-      texto = '[Audio recibido]'
+      texto = ''
       tipo = 'audio'
+      mediaInfo = {
+        base64: message.audioMessage.base64 || '',
+        mimetype: message.audioMessage.mimetype || 'audio/ogg',
+      }
     } else if (message.documentMessage) {
       texto = `[Documento: ${message.documentMessage.fileName || 'archivo'}]`
       tipo = 'document'
@@ -61,7 +73,8 @@ export async function POST(request: NextRequest) {
       tipo = 'video'
     }
 
-    if (!texto) {
+    // Si no hay texto ni media procesable, ignorar
+    if (!texto && !mediaInfo?.base64 && tipo === 'text') {
       return NextResponse.json({ status: 'no_text' })
     }
 
@@ -81,6 +94,83 @@ export async function POST(request: NextRequest) {
     }
 
     const clienteId = instancia.cliente_id
+    const apiKeyEvolution = instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || ''
+
+    // ============================================
+    // PROCESAR AUDIO O IMAGEN SI EXISTE
+    // ============================================
+
+    if (tipo === 'audio' && mediaInfo) {
+      console.log('Procesando audio de:', numero)
+
+      // Si no tenemos base64 en el mensaje, intentar descargar
+      let audioBase64 = mediaInfo.base64
+      if (!audioBase64 && messageId) {
+        const mediaDescargada = await descargarMedia(
+          instancia.evolution_instance,
+          apiKeyEvolution,
+          messageId
+        )
+        if (mediaDescargada) {
+          audioBase64 = mediaDescargada.base64
+          mediaInfo.mimetype = mediaDescargada.mimetype
+        }
+      }
+
+      if (audioBase64 && esAudioCompatible(mediaInfo.mimetype)) {
+        const audioBuffer = base64ToBuffer(audioBase64)
+        const transcripcion = await transcribirAudio(audioBuffer, mediaInfo.mimetype)
+
+        if (transcripcion) {
+          texto = transcripcion
+          console.log('Audio transcrito exitosamente:', transcripcion.substring(0, 50) + '...')
+        } else {
+          texto = '[Audio recibido - no se pudo transcribir]'
+        }
+      } else {
+        texto = '[Audio recibido - formato no compatible]'
+      }
+    }
+
+    if (tipo === 'image' && mediaInfo) {
+      console.log('Procesando imagen de:', numero)
+
+      // Si no tenemos base64 en el mensaje, intentar descargar
+      let imageBase64 = mediaInfo.base64
+      if (!imageBase64 && messageId) {
+        const mediaDescargada = await descargarMedia(
+          instancia.evolution_instance,
+          apiKeyEvolution,
+          messageId
+        )
+        if (mediaDescargada) {
+          imageBase64 = mediaDescargada.base64
+          mediaInfo.mimetype = mediaDescargada.mimetype
+        }
+      }
+
+      if (imageBase64 && esImagenCompatible(mediaInfo.mimetype)) {
+        const descripcion = await analizarImagen(
+          imageBase64,
+          mediaInfo.mimetype,
+          texto
+            ? `El usuario envió esta imagen con el texto: "${texto}". Describe la imagen y responde a su mensaje.`
+            : 'Describe detalladamente qué ves en esta imagen. Si hay texto o productos, identifícalos.'
+        )
+
+        if (descripcion) {
+          // Combinar caption original con descripción de la imagen
+          texto = texto
+            ? `[Imagen: ${descripcion}]\n\nMensaje del usuario: ${texto}`
+            : `[El usuario envió una imagen: ${descripcion}]`
+          console.log('Imagen analizada exitosamente')
+        } else {
+          texto = texto || '[Imagen recibida - no se pudo analizar]'
+        }
+      } else {
+        texto = texto || '[Imagen recibida - formato no compatible]'
+      }
+    }
 
     // Guardar mensaje entrante en historial
     await query(

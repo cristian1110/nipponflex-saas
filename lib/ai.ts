@@ -112,7 +112,7 @@ export function construirHistorialMensajes(
 export const MODELOS_DISPONIBLES = {
   'llama-3.1-8b-instant': 'Llama 3.1 8B (Rápido)',
   'llama-3.1-70b-versatile': 'Llama 3.1 70B (Potente)',
-  'llama-3.2-90b-vision-preview': 'Llama 3.2 90B Vision',
+  'llama-3.2-11b-vision-preview': 'Llama 3.2 11B Vision',
   'mixtral-8x7b-32768': 'Mixtral 8x7B',
   'gemma2-9b-it': 'Gemma 2 9B',
 }
@@ -127,4 +127,141 @@ export function mapearModelo(modeloOriginal: string): string {
   }
 
   return mapeo[modeloOriginal] || modeloOriginal
+}
+
+// ============================================
+// TRANSCRIPCIÓN DE AUDIO (Whisper)
+// ============================================
+
+const GROQ_WHISPER_URL = 'https://api.groq.com/openai/v1/audio/transcriptions'
+
+export async function transcribirAudio(
+  audioBuffer: Buffer,
+  mimetype: string = 'audio/ogg'
+): Promise<string | null> {
+  const apiKey = process.env.GROQ_API_KEY
+
+  if (!apiKey) {
+    console.error('GROQ_API_KEY no configurada para Whisper')
+    return null
+  }
+
+  try {
+    // Determinar extensión del archivo
+    const extensiones: Record<string, string> = {
+      'audio/ogg': 'ogg',
+      'audio/mpeg': 'mp3',
+      'audio/mp3': 'mp3',
+      'audio/mp4': 'm4a',
+      'audio/m4a': 'm4a',
+      'audio/wav': 'wav',
+      'audio/webm': 'webm',
+      'audio/flac': 'flac',
+    }
+    const ext = extensiones[mimetype] || 'ogg'
+
+    // Crear FormData con el archivo
+    const formData = new FormData()
+    const blob = new Blob([audioBuffer], { type: mimetype })
+    formData.append('file', blob, `audio.${ext}`)
+    formData.append('model', 'whisper-large-v3')
+    formData.append('language', 'es')
+    formData.append('response_format', 'text')
+
+    const response = await fetch(GROQ_WHISPER_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      console.error('Error Whisper:', response.status, error)
+      return null
+    }
+
+    const transcripcion = await response.text()
+    console.log('Audio transcrito:', transcripcion.substring(0, 100) + '...')
+
+    return transcripcion.trim()
+  } catch (error) {
+    console.error('Error transcribiendo audio:', error)
+    return null
+  }
+}
+
+// ============================================
+// ANÁLISIS DE IMÁGENES (Vision)
+// ============================================
+
+const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+
+export async function analizarImagen(
+  imageBase64: string,
+  mimetype: string = 'image/jpeg',
+  pregunta: string = 'Describe detalladamente qué ves en esta imagen. Si hay texto, transcríbelo.'
+): Promise<string | null> {
+  const apiKey = process.env.GROQ_API_KEY
+
+  if (!apiKey) {
+    console.error('GROQ_API_KEY no configurada para Vision')
+    return null
+  }
+
+  try {
+    // Asegurar formato correcto de base64
+    const base64Data = imageBase64.includes('base64,')
+      ? imageBase64
+      : `data:${mimetype};base64,${imageBase64}`
+
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: VISION_MODEL,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: pregunta,
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: base64Data,
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: 500,
+        temperature: 0.3,
+      }),
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      console.error('Error Vision:', response.status, error)
+      return null
+    }
+
+    const data = await response.json()
+    const descripcion = data.choices[0]?.message?.content || null
+
+    if (descripcion) {
+      console.log('Imagen analizada:', descripcion.substring(0, 100) + '...')
+    }
+
+    return descripcion
+  } catch (error) {
+    console.error('Error analizando imagen:', error)
+    return null
+  }
 }
