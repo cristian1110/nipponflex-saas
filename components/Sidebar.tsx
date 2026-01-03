@@ -25,6 +25,8 @@ const menuItems = [
   { href: '/clientes', icon: '🏢', label: 'Clientes', minLevel: 5 },
   { href: '/integraciones', icon: '🔗', label: 'Integraciones', minLevel: 4 },
   { href: '/configuracion', icon: '⚙️', label: 'Configuración', minLevel: 3 },
+  // Solo Super Admin (nivel 100)
+  { href: '/admin/metricas', icon: '📈', label: 'Métricas APIs', minLevel: 100 },
 ]
 
 export default function Sidebar({ user }: SidebarProps) {

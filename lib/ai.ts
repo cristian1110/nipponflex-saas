@@ -1,21 +1,27 @@
 // Servicio de IA para respuestas automáticas con Groq
 // Compatible con OpenAI API format
 
+import { registrarUsoAPI, calcularCostoGroq, PRECIOS_API } from './metricas'
+
 interface Message {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | any[]
 }
 
 interface AIConfig {
   modelo?: string
   temperatura?: number
   maxTokens?: number
+  clienteId?: number // Para tracking de métricas
 }
 
 interface AIResponse {
   content: string
   tokensUsados: number
+  tokensInput: number
+  tokensOutput: number
   modelo: string
+  costoUsd: number
 }
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
@@ -34,6 +40,7 @@ export async function generarRespuestaIA(
   const modelo = config.modelo || DEFAULT_MODEL
   const temperatura = config.temperatura ?? 0.7
   const maxTokens = config.maxTokens || 500
+  const startTime = Date.now()
 
   try {
     const response = await fetch(GROQ_API_URL, {
@@ -58,11 +65,33 @@ export async function generarRespuestaIA(
     }
 
     const data = await response.json()
+    const duracionMs = Date.now() - startTime
+
+    const tokensInput = data.usage?.prompt_tokens || 0
+    const tokensOutput = data.usage?.completion_tokens || 0
+    const costoUsd = calcularCostoGroq(modelo, tokensInput, tokensOutput)
+
+    // Registrar métricas si hay clienteId
+    if (config.clienteId) {
+      await registrarUsoAPI({
+        clienteId: config.clienteId,
+        servicio: 'groq',
+        endpoint: 'chat/completions',
+        tokensInput,
+        tokensOutput,
+        costoUsd,
+        duracionMs,
+        modelo,
+      })
+    }
 
     return {
       content: data.choices[0]?.message?.content || '',
-      tokensUsados: data.usage?.total_tokens || 0,
-      modelo: modelo,
+      tokensUsados: tokensInput + tokensOutput,
+      tokensInput,
+      tokensOutput,
+      modelo,
+      costoUsd,
     }
   } catch (error) {
     console.error('Error generando respuesta IA:', error)
@@ -137,7 +166,8 @@ const GROQ_WHISPER_URL = 'https://api.groq.com/openai/v1/audio/transcriptions'
 
 export async function transcribirAudio(
   audioBuffer: Buffer,
-  mimetype: string = 'audio/ogg'
+  mimetype: string = 'audio/ogg',
+  clienteId?: number
 ): Promise<string | null> {
   const apiKey = process.env.GROQ_API_KEY
 
@@ -145,6 +175,8 @@ export async function transcribirAudio(
     console.error('GROQ_API_KEY no configurada para Whisper')
     return null
   }
+
+  const startTime = Date.now()
 
   try {
     // Determinar extensión del archivo
@@ -166,7 +198,7 @@ export async function transcribirAudio(
     formData.append('file', blob, `audio.${ext}`)
     formData.append('model', 'whisper-large-v3')
     formData.append('language', 'es')
-    formData.append('response_format', 'text')
+    formData.append('response_format', 'verbose_json')
 
     const response = await fetch(GROQ_WHISPER_URL, {
       method: 'POST',
@@ -182,7 +214,26 @@ export async function transcribirAudio(
       return null
     }
 
-    const transcripcion = await response.text()
+    const data = await response.json()
+    const duracionMs = Date.now() - startTime
+    const duracionAudio = data.duration || 0
+    const costoUsd = duracionAudio * PRECIOS_API.groq['whisper-large-v3']
+
+    // Registrar métricas
+    if (clienteId) {
+      await registrarUsoAPI({
+        clienteId,
+        servicio: 'whisper',
+        endpoint: 'audio/transcriptions',
+        tokensInput: Math.ceil(duracionAudio),
+        costoUsd,
+        duracionMs,
+        modelo: 'whisper-large-v3',
+        metadata: { duracion_audio: duracionAudio }
+      })
+    }
+
+    const transcripcion = data.text || ''
     console.log('Audio transcrito:', transcripcion.substring(0, 100) + '...')
 
     return transcripcion.trim()
@@ -201,7 +252,8 @@ const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 export async function analizarImagen(
   imageBase64: string,
   mimetype: string = 'image/jpeg',
-  pregunta: string = 'Describe detalladamente qué ves en esta imagen. Si hay texto, transcríbelo.'
+  pregunta: string = 'Describe detalladamente qué ves en esta imagen. Si hay texto, transcríbelo.',
+  clienteId?: number
 ): Promise<string | null> {
   const apiKey = process.env.GROQ_API_KEY
 
@@ -209,6 +261,8 @@ export async function analizarImagen(
     console.error('GROQ_API_KEY no configurada para Vision')
     return null
   }
+
+  const startTime = Date.now()
 
   try {
     // Asegurar formato correcto de base64
@@ -253,6 +307,25 @@ export async function analizarImagen(
     }
 
     const data = await response.json()
+    const duracionMs = Date.now() - startTime
+    const tokensInput = data.usage?.prompt_tokens || 0
+    const tokensOutput = data.usage?.completion_tokens || 0
+    const costoUsd = calcularCostoGroq(VISION_MODEL, tokensInput, tokensOutput)
+
+    // Registrar métricas
+    if (clienteId) {
+      await registrarUsoAPI({
+        clienteId,
+        servicio: 'vision',
+        endpoint: 'chat/completions',
+        tokensInput,
+        tokensOutput,
+        costoUsd,
+        duracionMs,
+        modelo: VISION_MODEL,
+      })
+    }
+
     const descripcion = data.choices[0]?.message?.content || null
 
     if (descripcion) {

@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
 
       if (audioBase64 && esAudioCompatible(mediaInfo.mimetype)) {
         const audioBuffer = base64ToBuffer(audioBase64)
-        const transcripcion = await transcribirAudio(audioBuffer, mediaInfo.mimetype)
+        const transcripcion = await transcribirAudio(audioBuffer, mediaInfo.mimetype, clienteId)
 
         if (transcripcion) {
           texto = transcripcion
@@ -155,7 +155,8 @@ export async function POST(request: NextRequest) {
           mediaInfo.mimetype,
           texto
             ? `El usuario envió esta imagen con el texto: "${texto}". Describe la imagen y responde a su mensaje.`
-            : 'Describe detalladamente qué ves en esta imagen. Si hay texto o productos, identifícalos.'
+            : 'Describe detalladamente qué ves en esta imagen. Si hay texto o productos, identifícalos.',
+          clienteId
         )
 
         if (descripcion) {
@@ -307,6 +308,7 @@ export async function POST(request: NextRequest) {
       modelo: mapearModelo(agente.modelo_llm || 'gpt-4o-mini'),
       temperatura: parseFloat(agente.temperatura) || 0.7,
       maxTokens: agente.max_tokens || 500,
+      clienteId: clienteId, // Para tracking de métricas
     })
 
     if (!respuestaIA.content) {
