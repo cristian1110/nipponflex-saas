@@ -16,18 +16,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }
 
-    const body = await request.json().catch(() => ({}))
-    const minutosAntes = body.minutos_antes || 120 // Por defecto 2 horas antes
-
     // Buscar citas que necesitan recordatorio:
     // - Estado pendiente o confirmada
     // - Recordatorio no enviado
-    // - Fecha/hora en los próximos X minutos
+    // - Recordatorio configurado (recordatorio_minutos > 0)
+    // - Fecha/hora está dentro del tiempo de recordatorio
     // - Tienen teléfono asociado (del lead o directo)
     const citasPendientes = await query(`
       SELECT
         c.id, c.titulo, c.fecha_inicio, c.recordatorio_canal,
-        c.telefono_recordatorio,
+        c.telefono_recordatorio, c.recordatorio_minutos,
         l.telefono as lead_telefono, l.nombre as lead_nombre,
         cl.id as cliente_id,
         iw.evolution_instance, iw.evolution_api_key
@@ -37,8 +35,9 @@ export async function POST(request: NextRequest) {
       LEFT JOIN instancias_whatsapp iw ON iw.cliente_id = cl.id AND iw.estado = 'conectado'
       WHERE c.estado IN ('pendiente', 'confirmada')
         AND c.recordatorio_enviado = false
+        AND COALESCE(c.recordatorio_minutos, 120) > 0
         AND c.fecha_inicio > NOW()
-        AND c.fecha_inicio <= NOW() + INTERVAL '${minutosAntes} minutes'
+        AND c.fecha_inicio <= NOW() + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
         AND (c.telefono_recordatorio IS NOT NULL OR l.telefono IS NOT NULL)
       ORDER BY c.fecha_inicio
       LIMIT 20
@@ -160,8 +159,9 @@ export async function GET() {
     FROM citas
     WHERE estado IN ('pendiente', 'confirmada')
       AND recordatorio_enviado = false
+      AND COALESCE(recordatorio_minutos, 120) > 0
       AND fecha_inicio > NOW()
-      AND fecha_inicio <= NOW() + INTERVAL '2 hours'
+      AND fecha_inicio <= NOW() + (COALESCE(recordatorio_minutos, 120) || ' minutes')::interval
   `)
 
   return NextResponse.json({

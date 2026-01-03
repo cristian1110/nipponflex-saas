@@ -42,8 +42,20 @@ export default function CalendarioPage() {
     fecha: '',
     hora: '09:00',
     duracion: 30,
-    lead_telefono: ''
+    lead_telefono: '',
+    recordatorio_minutos: 120,
+    recordatorio_canal: 'whatsapp'
   })
+
+  const opcionesRecordatorio = [
+    { valor: 0, texto: 'Sin recordatorio' },
+    { valor: 15, texto: '15 minutos antes' },
+    { valor: 30, texto: '30 minutos antes' },
+    { valor: 60, texto: '1 hora antes' },
+    { valor: 120, texto: '2 horas antes' },
+    { valor: 1440, texto: '1 día antes' },
+    { valor: 2880, texto: '2 días antes' },
+  ]
 
   const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
   const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
@@ -453,8 +465,26 @@ export default function CalendarioPage() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-[var(--text-secondary)]">Teléfono contacto (opcional)</label>
+                <label className="text-xs text-[var(--text-secondary)]">Teléfono contacto (para recordatorio)</label>
                 <input type="tel" placeholder="+593..." value={newCita.lead_telefono} onChange={(e) => setNewCita({ ...newCita, lead_telefono: e.target.value })} className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)]">Recordatorio</label>
+                  <select value={newCita.recordatorio_minutos} onChange={(e) => setNewCita({ ...newCita, recordatorio_minutos: Number(e.target.value) })} className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">
+                    {opcionesRecordatorio.map(op => (
+                      <option key={op.valor} value={op.valor}>{op.texto}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)]">Canal</label>
+                  <select value={newCita.recordatorio_canal} onChange={(e) => setNewCita({ ...newCita, recordatorio_canal: e.target.value })} className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="sms">SMS</option>
+                    <option value="email">Email</option>
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="text-xs text-[var(--text-secondary)]">Descripción</label>

@@ -196,11 +196,30 @@ export function parsearFechaHora(texto: string): { fecha: Date | null, hora: str
   return { fecha, hora }
 }
 
+// Opciones de recordatorio disponibles
+export const OPCIONES_RECORDATORIO = [
+  { valor: 15, texto: '15 minutos antes' },
+  { valor: 30, texto: '30 minutos antes' },
+  { valor: 60, texto: '1 hora antes' },
+  { valor: 120, texto: '2 horas antes' },
+  { valor: 1440, texto: '1 día antes' },
+  { valor: 2880, texto: '2 días antes' },
+]
+
 // Prompt adicional para que la IA detecte y confirme citas
 export function getPromptCitas(): string {
+  const hoy = new Date()
+  const manana = new Date(hoy)
+  manana.setDate(manana.getDate() + 1)
+
+  const formatoFecha = (d: Date) => d.toISOString().split('T')[0]
+
   return `
 
 ## AGENDAR CITAS
+Fecha de hoy: ${formatoFecha(hoy)}
+Fecha de mañana: ${formatoFecha(manana)}
+
 Puedes ayudar a los clientes a agendar citas. Cuando detectes que el cliente quiere agendar una cita:
 1. Pregunta la fecha y hora deseada si no la mencionó
 2. Confirma los detalles antes de agendar
@@ -213,19 +232,10 @@ titulo: Descripción breve de la cita
 duracion: 30
 [/CITA_CONFIRMADA]
 
-Ejemplo de conversación:
-- Cliente: "Quiero agendar una cita para el martes a las 3pm"
-- Tú: "Perfecto, te agendo una cita para el martes a las 3:00 PM. ¿Es correcto?"
-- Cliente: "Sí, confirmo"
-- Tú: "¡Excelente! Tu cita ha sido agendada con éxito.
-[CITA_CONFIRMADA]
-fecha: 2025-01-07
-hora: 15:00
-titulo: Cita con cliente
-duracion: 30
-[/CITA_CONFIRMADA]"
-
-IMPORTANTE: Solo incluye el bloque [CITA_CONFIRMADA] cuando el cliente haya confirmado explícitamente la cita.
+IMPORTANTE:
+- Usa SIEMPRE el año ${hoy.getFullYear()} para las fechas
+- Si dicen "mañana", usa la fecha ${formatoFecha(manana)}
+- Solo incluye el bloque [CITA_CONFIRMADA] cuando el cliente haya confirmado explícitamente la cita
 `
 }
 
