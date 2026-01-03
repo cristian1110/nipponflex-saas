@@ -92,42 +92,57 @@ export async function POST(request: NextRequest) {
 
     try {
       if (extension === 'txt' || extension === 'csv') {
+        // Archivos de texto plano
         contenidoTexto = buffer.toString('utf-8')
       } else if (extension === 'xlsx' || extension === 'xls') {
+        // Archivos Excel
         const XLSX = require('xlsx')
         const workbook = XLSX.read(buffer, { type: 'buffer' })
         workbook.SheetNames.forEach((sheetName: string) => {
           const sheet = workbook.Sheets[sheetName]
+          contenidoTexto += `=== Hoja: ${sheetName} ===\n`
           contenidoTexto += XLSX.utils.sheet_to_txt(sheet) + '\n\n'
         })
+      } else if (extension === 'pdf') {
+        // Archivos PDF
+        const pdfParse = require('pdf-parse')
+        const pdfData = await pdfParse(buffer)
+        contenidoTexto = pdfData.text || ''
+        if (!contenidoTexto.trim()) {
+          contenidoTexto = '[PDF sin texto extraíble - posiblemente escaneado]'
+        }
+      } else if (extension === 'docx') {
+        // Archivos Word
+        const mammoth = require('mammoth')
+        const result = await mammoth.extractRawText({ buffer })
+        contenidoTexto = result.value || ''
+        if (!contenidoTexto.trim()) {
+          contenidoTexto = '[Documento Word vacío o sin texto]'
+        }
       } else {
-        // Para PDF y DOCX, guardar sin extraer por ahora
-        contenidoTexto = `[Archivo ${extension.toUpperCase()} - Extracción pendiente]`
+        contenidoTexto = `[Formato ${extension.toUpperCase()} no soportado para extracción]`
       }
+
+      // Limpiar texto extraído
+      contenidoTexto = contenidoTexto
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+
     } catch (e) {
       console.error('Error extrayendo texto:', e)
-      contenidoTexto = '[Error al extraer texto del archivo]'
+      contenidoTexto = `[Error al extraer texto del archivo: ${e instanceof Error ? e.message : 'desconocido'}]`
     }
-
-    // Crear chunks del contenido
-    const chunks = crearChunks(contenidoTexto, 500)
 
     // Guardar en BD
     const conocimiento = await queryOne(
-      `INSERT INTO conocimientos (cliente_id, agente_id, nombre_archivo, nombre_original, tipo_archivo, tamano_bytes, contenido_texto, total_chunks, estado)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'listo')
+      `INSERT INTO conocimientos (cliente_id, agente_id, nombre_archivo, tipo, contenido_texto, tamano_bytes, estado, activo)
+       VALUES ($1, $2, $3, $4, $5, $6, 'listo', true)
        RETURNING *`,
-      [user.cliente_id, agente_id, file.name, file.name, extension, file.size, contenidoTexto, chunks.length]
+      [user.cliente_id, agente_id, file.name, extension, contenidoTexto, file.size]
     )
 
-    // Guardar chunks
-    for (let i = 0; i < chunks.length; i++) {
-      await query(
-        `INSERT INTO conocimientos_chunks (conocimiento_id, chunk_index, contenido, tokens)
-         VALUES ($1, $2, $3, $4)`,
-        [conocimiento.id, i, chunks[i], chunks[i].split(' ').length]
-      )
-    }
+    console.log('Conocimiento guardado:', conocimiento?.id, '- Texto:', contenidoTexto.substring(0, 100) + '...')
 
     return NextResponse.json(conocimiento, { status: 201 })
   } catch (error) {
@@ -159,9 +174,6 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Conocimiento no encontrado' }, { status: 404 })
     }
 
-    // Eliminar chunks primero (por CASCADE debería ser automático, pero por si acaso)
-    await query(`DELETE FROM conocimientos_chunks WHERE conocimiento_id = $1`, [id])
-    
     // Eliminar conocimiento
     await query(`DELETE FROM conocimientos WHERE id = $1`, [id])
 
@@ -170,28 +182,4 @@ export async function DELETE(request: NextRequest) {
     console.error('Error:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
-}
-
-// Función para crear chunks de texto
-function crearChunks(texto: string, tamanoChunk: number = 500): string[] {
-  if (!texto || texto.length === 0) return []
-  
-  const palabras = texto.split(/\s+/)
-  const chunks: string[] = []
-  let chunkActual: string[] = []
-  
-  for (const palabra of palabras) {
-    chunkActual.push(palabra)
-    if (chunkActual.length >= tamanoChunk) {
-      chunks.push(chunkActual.join(' '))
-      // Overlap de 50 palabras
-      chunkActual = chunkActual.slice(-50)
-    }
-  }
-  
-  if (chunkActual.length > 0) {
-    chunks.push(chunkActual.join(' '))
-  }
-  
-  return chunks
 }

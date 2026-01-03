@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne, execute } from '@/lib/db'
+import { generarRespuestaIA, construirPromptSistema, mapearModelo } from '@/lib/ai'
+import { enviarMensajeWhatsApp, enviarPresencia } from '@/lib/evolution'
 
 // Webhook para recibir mensajes de Evolution API
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log('Webhook WhatsApp:', JSON.stringify(body, null, 2))
+    console.log('Webhook WhatsApp recibido:', body.event)
 
     // Estructura de Evolution API v2
     const { event, data, instance } = body
@@ -19,13 +21,13 @@ export async function POST(request: NextRequest) {
     const remoteJid = data.key?.remoteJid
     const fromMe = data.key?.fromMe
 
-    // Ignorar mensajes propios
-    if (fromMe) {
+    // Ignorar mensajes propios y de grupos
+    if (fromMe || remoteJid?.includes('@g.us')) {
       return NextResponse.json({ status: 'ignored' })
     }
 
     // Extraer número de teléfono
-    const numero = remoteJid?.replace('@s.whatsapp.net', '').replace('@g.us', '')
+    const numero = remoteJid?.replace('@s.whatsapp.net', '')
     if (!numero) {
       return NextResponse.json({ status: 'ignored' })
     }
@@ -33,45 +35,51 @@ export async function POST(request: NextRequest) {
     // Extraer contenido del mensaje
     let texto = ''
     let tipo = 'text'
-    let mediaUrl = null
 
     if (message.conversation) {
       texto = message.conversation
     } else if (message.extendedTextMessage?.text) {
       texto = message.extendedTextMessage.text
     } else if (message.imageMessage) {
-      texto = message.imageMessage.caption || '[Imagen]'
+      texto = message.imageMessage.caption || '[Imagen recibida]'
       tipo = 'image'
     } else if (message.audioMessage) {
-      texto = '[Audio]'
+      texto = '[Audio recibido]'
       tipo = 'audio'
     } else if (message.documentMessage) {
-      texto = message.documentMessage.fileName || '[Documento]'
+      texto = `[Documento: ${message.documentMessage.fileName || 'archivo'}]`
       tipo = 'document'
     } else if (message.videoMessage) {
-      texto = message.videoMessage.caption || '[Video]'
+      texto = message.videoMessage.caption || '[Video recibido]'
       tipo = 'video'
     }
 
-    // Buscar cliente asociado a esta instancia
-    const integracion = await queryOne(
-      `SELECT cliente_id FROM integraciones WHERE tipo = 'whatsapp' AND activo = true AND config::text LIKE $1`,
-      [`%${instance}%`]
-    )
-
-    if (!integracion) {
-      console.log('Cliente no encontrado para instancia:', instance)
-      return NextResponse.json({ status: 'no_client' })
+    if (!texto) {
+      return NextResponse.json({ status: 'no_text' })
     }
 
-    const clienteId = integracion.cliente_id
+    // Buscar instancia de WhatsApp
+    const instancia = await queryOne(
+      `SELECT iw.*, c.id as cliente_id
+       FROM instancias_whatsapp iw
+       JOIN clientes c ON iw.cliente_id = c.id
+       WHERE iw.evolution_instance = $1 AND iw.estado = 'conectado'
+       LIMIT 1`,
+      [instance]
+    )
 
-    // Guardar mensaje entrante
-    const nuevoMensaje = await queryOne(
-      `INSERT INTO mensajes (cliente_id, numero_whatsapp, rol, mensaje, tipo, media_url, canal, leido)
-       VALUES ($1, $2, 'user', $3, $4, $5, 'whatsapp', false)
-       RETURNING *`,
-      [clienteId, numero, texto, tipo, mediaUrl]
+    if (!instancia) {
+      console.log('Instancia no encontrada:', instance)
+      return NextResponse.json({ status: 'no_instance' })
+    }
+
+    const clienteId = instancia.cliente_id
+
+    // Guardar mensaje entrante en historial
+    await query(
+      `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje)
+       VALUES ($1, $2, 'user', $3)`,
+      [clienteId, numero, texto]
     )
 
     // Buscar o crear lead
@@ -81,71 +89,170 @@ export async function POST(request: NextRequest) {
     )
 
     if (!lead) {
-      // Obtener primera etapa del pipeline
-      const etapa = await queryOne(
-        `SELECT id FROM etapas_crm WHERE cliente_id = $1 ORDER BY orden LIMIT 1`,
+      const pipeline = await queryOne(
+        `SELECT id FROM pipelines WHERE cliente_id = $1 ORDER BY created_at LIMIT 1`,
         [clienteId]
       )
 
-      // Crear lead automático
+      const etapa = await queryOne(
+        `SELECT id FROM etapas_crm WHERE pipeline_id = $1 ORDER BY orden LIMIT 1`,
+        [pipeline?.id]
+      )
+
       lead = await queryOne(
         `INSERT INTO leads (cliente_id, nombre, telefono, etapa_id, origen)
          VALUES ($1, $2, $3, $4, 'WhatsApp')
          RETURNING *`,
         [clienteId, `WhatsApp ${numero}`, numero, etapa?.id]
       )
+      console.log('Lead creado automáticamente:', lead?.id)
     }
 
-    // Actualizar último contacto
+    // Actualizar último contacto del lead
     await execute(
-      `UPDATE leads SET ultimo_contacto = NOW(), updated_at = NOW() WHERE id = $1`,
+      `UPDATE leads SET updated_at = NOW() WHERE id = $1`,
       [lead.id]
     )
 
-    // Incrementar contador de mensajes
-    await execute(
-      `UPDATE clientes SET mensajes_usados = mensajes_usados + 1 WHERE id = $1`,
+    // Buscar agente activo
+    const agente = await queryOne(
+      `SELECT * FROM agentes WHERE cliente_id = $1 AND estado = 'activo' LIMIT 1`,
       [clienteId]
     )
 
-    // Buscar agente activo para respuesta automática
-    const agente = await queryOne(
-      `SELECT * FROM agentes WHERE cliente_id = $1 AND activo = true AND (whatsapp_numero = $2 OR whatsapp_numero IS NULL) LIMIT 1`,
-      [clienteId, numero]
-    )
+    if (!agente) {
+      console.log('No hay agente activo para cliente:', clienteId)
+      return NextResponse.json({
+        status: 'ok',
+        mensaje: 'Mensaje guardado (sin agente activo)',
+        lead_id: lead.id
+      })
+    }
 
-    if (agente) {
-      // Enviar a n8n para procesamiento con IA
-      const n8nWebhook = process.env.N8N_WEBHOOK_URL
-      if (n8nWebhook) {
-        try {
-          await fetch(n8nWebhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              cliente_id: clienteId,
-              agente_id: agente.id,
-              lead_id: lead.id,
-              numero,
-              mensaje: texto,
-              tipo,
-              prompt_sistema: agente.prompt_sistema,
-              personalidad: agente.personalidad,
-              temperatura: agente.temperatura,
-              modelo: agente.modelo,
-            }),
+    // Verificar horario de operación del agente
+    const ahora = new Date()
+    const horaActual = ahora.getHours()
+    const config = agente.configuracion_extra || {}
+
+    if (config.hora_inicio && config.hora_fin) {
+      const horaInicio = parseInt(config.hora_inicio.split(':')[0])
+      const horaFin = parseInt(config.hora_fin.split(':')[0])
+
+      if (horaActual < horaInicio || horaActual >= horaFin) {
+        // Fuera de horario - enviar mensaje automático si está configurado
+        if (config.mensaje_fuera_horario) {
+          await enviarMensajeWhatsApp({
+            instancia: instancia.evolution_instance,
+            apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+            numero,
+            mensaje: config.mensaje_fuera_horario,
           })
-        } catch (e) {
-          console.error('Error enviando a n8n:', e)
+
+          await query(
+            `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje)
+             VALUES ($1, $2, 'assistant', $3)`,
+            [clienteId, numero, config.mensaje_fuera_horario]
+          )
         }
+
+        return NextResponse.json({
+          status: 'ok',
+          mensaje: 'Fuera de horario',
+          lead_id: lead.id
+        })
       }
     }
 
-    return NextResponse.json({ 
-      status: 'ok',
-      mensaje_id: nuevoMensaje.id,
-      lead_id: lead.id,
+    // Cargar historial de conversación reciente
+    const historial = await query(
+      `SELECT rol, mensaje FROM historial_conversaciones
+       WHERE cliente_id = $1 AND numero_whatsapp = $2
+       ORDER BY created_at DESC LIMIT 10`,
+      [clienteId, numero]
+    )
+
+    // Cargar base de conocimiento del agente
+    const conocimientos = await query(
+      `SELECT contenido_texto FROM conocimientos
+       WHERE agente_id = $1 AND activo = true AND contenido_texto IS NOT NULL
+       LIMIT 5`,
+      [agente.id]
+    )
+
+    // Construir mensajes para la IA
+    const promptSistema = construirPromptSistema(
+      agente.prompt_sistema,
+      conocimientos.map(c => c.contenido_texto),
+      agente.nombre
+    )
+
+    const mensajesIA = [
+      { role: 'system' as const, content: promptSistema },
+      // Historial en orden cronológico (revertir porque viene DESC)
+      ...historial.reverse().map(h => ({
+        role: h.rol === 'user' ? 'user' as const : 'assistant' as const,
+        content: h.mensaje,
+      })),
+    ]
+
+    // Mostrar "escribiendo..." al usuario
+    await enviarPresencia(
+      instancia.evolution_instance,
+      instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+      numero,
+      'composing'
+    )
+
+    // Generar respuesta con IA
+    console.log('Generando respuesta IA para:', numero)
+
+    const respuestaIA = await generarRespuestaIA(mensajesIA, {
+      modelo: mapearModelo(agente.modelo_llm || 'gpt-4o-mini'),
+      temperatura: parseFloat(agente.temperatura) || 0.7,
+      maxTokens: agente.max_tokens || 500,
     })
+
+    if (!respuestaIA.content) {
+      console.error('Respuesta IA vacía')
+      return NextResponse.json({ status: 'error', error: 'Respuesta IA vacía' })
+    }
+
+    // Enviar respuesta por WhatsApp
+    const resultado = await enviarMensajeWhatsApp({
+      instancia: instancia.evolution_instance,
+      apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+      numero,
+      mensaje: respuestaIA.content,
+      delayMs: 500 + Math.random() * 1500, // Delay aleatorio 0.5-2s para parecer más natural
+    })
+
+    if (!resultado.success) {
+      console.error('Error enviando mensaje:', resultado.error)
+      return NextResponse.json({ status: 'error', error: resultado.error })
+    }
+
+    // Guardar respuesta en historial
+    await query(
+      `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje)
+       VALUES ($1, $2, 'assistant', $3)`,
+      [clienteId, numero, respuestaIA.content]
+    )
+
+    // Incrementar contador de mensajes del cliente
+    await execute(
+      `UPDATE clientes SET uso_mensajes_mes = COALESCE(uso_mensajes_mes, 0) + 1 WHERE id = $1`,
+      [clienteId]
+    )
+
+    console.log('Respuesta IA enviada exitosamente a:', numero)
+
+    return NextResponse.json({
+      status: 'ok',
+      lead_id: lead.id,
+      respuesta_enviada: true,
+      tokens_usados: respuestaIA.tokensUsados,
+    })
+
   } catch (error) {
     console.error('Error webhook:', error)
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
@@ -154,5 +261,9 @@ export async function POST(request: NextRequest) {
 
 // Verificación GET para Evolution API
 export async function GET(request: NextRequest) {
-  return NextResponse.json({ status: 'Webhook activo', timestamp: new Date().toISOString() })
+  return NextResponse.json({
+    status: 'Webhook NipponFlex activo',
+    timestamp: new Date().toISOString(),
+    version: '2.0'
+  })
 }
