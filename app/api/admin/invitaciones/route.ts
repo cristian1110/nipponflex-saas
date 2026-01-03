@@ -69,27 +69,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Ya existe una invitacion pendiente para este email' }, { status: 400 })
     }
 
-    // Si es sub-usuario, verificar limite del plan NipponFlex
-    if (tipo === 'sub_usuario') {
-      const countSubUsuarios = await queryOne(
-        `SELECT COUNT(*) as total FROM invitaciones 
-         WHERE cliente_padre_id = $1 AND (estado = 'pendiente' OR estado = 'aceptada')`,
-        [user.cliente_id]
-      )
-      
-      // Obtener limite del plan
-      const planInfo = await queryOne(
-        `SELECT p.max_sub_usuarios FROM clientes c 
-         JOIN planes p ON c.plan_id = p.id 
-         WHERE c.id = $1`,
-        [user.cliente_id]
-      )
-      
-      if (planInfo && countSubUsuarios.total >= planInfo.max_sub_usuarios) {
-        return NextResponse.json({ 
-          error: `Has alcanzado el limite de ${planInfo.max_sub_usuarios} sub-usuarios` 
-        }, { status: 400 })
-      }
+    // Verificar límite de usuarios del plan
+    const countUsuarios = await queryOne(
+      `SELECT COUNT(*) as total FROM usuarios WHERE cliente_id = $1`,
+      [user.cliente_id]
+    )
+
+    // Obtener limite del plan
+    const planInfo = await queryOne(
+      `SELECT p.max_usuarios FROM clientes c
+       JOIN planes p ON c.plan_id = p.id
+       WHERE c.id = $1`,
+      [user.cliente_id]
+    )
+
+    if (planInfo && parseInt(countUsuarios?.total || '0') >= planInfo.max_usuarios) {
+      return NextResponse.json({
+        error: `Has alcanzado el límite de ${planInfo.max_usuarios} usuarios de tu plan`
+      }, { status: 400 })
     }
 
     // Generar token unico
@@ -108,7 +105,7 @@ export async function POST(request: NextRequest) {
         token,
         tipo || 'cliente',
         plan_id || null,
-        tipo === 'sub_usuario' ? user.cliente_id : null,
+        user.cliente_id, // Cliente padre
         limite_contactos || null,
         limite_mensajes || null,
         expiraAt,
@@ -120,13 +117,8 @@ export async function POST(request: NextRequest) {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://nipponflex.84.247.166.88.sslip.io'
 
     // Enviar email
-    let emailTemplate
-    if (tipo === 'sub_usuario') {
-      emailTemplate = emailTemplates.invitacionSubUsuario(nombre, token, user.nombre, baseUrl)
-    } else {
-      const planNombre = plan_id ? (await queryOne(`SELECT nombre FROM planes WHERE id = $1`, [plan_id]))?.nombre : 'Basico'
-      emailTemplate = emailTemplates.invitacionCliente(nombre, token, planNombre || 'Basico', baseUrl)
-    }
+    const planNombre = plan_id ? (await queryOne(`SELECT nombre FROM planes WHERE id = $1`, [plan_id]))?.nombre : 'Basico'
+    const emailTemplate = emailTemplates.invitacionCliente(nombre, token, planNombre || 'Basico', baseUrl)
 
     const emailResult = await sendEmail({
       to: email,

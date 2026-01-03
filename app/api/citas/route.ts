@@ -74,26 +74,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Fecha es requerida' }, { status: 400 })
     }
 
-    const { titulo, descripcion, lead_id, lead_telefono, tipo } = data
+    const { titulo, descripcion, lead_id, lead_telefono, tipo, recordatorio_minutos, recordatorio_canal } = data
 
     if (!titulo) {
       return NextResponse.json({ error: 'Título es requerido' }, { status: 400 })
     }
 
     let leadId = lead_id
+    let telefonoRecordatorio = lead_telefono?.replace(/\D/g, '') || null
+
     if (!leadId && lead_telefono) {
       const lead = await queryOne(
-        `SELECT id FROM leads WHERE cliente_id = $1 AND telefono = $2`,
-        [user.cliente_id || 1, lead_telefono.replace(/\D/g, '')]
+        `SELECT id, telefono FROM leads WHERE cliente_id = $1 AND telefono = $2`,
+        [user.cliente_id || 1, telefonoRecordatorio]
       )
-      if (lead) leadId = lead.id
+      if (lead) {
+        leadId = lead.id
+        telefonoRecordatorio = lead.telefono
+      }
+    } else if (leadId) {
+      // Obtener teléfono del lead
+      const lead = await queryOne(`SELECT telefono FROM leads WHERE id = $1`, [leadId])
+      if (lead) telefonoRecordatorio = lead.telefono
     }
 
     const result = await queryOne(
-      `INSERT INTO citas (cliente_id, usuario_id, lead_id, titulo, descripcion, fecha_inicio, fecha_fin, tipo, estado, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', NOW())
+      `INSERT INTO citas (cliente_id, usuario_id, lead_id, titulo, descripcion, fecha_inicio, fecha_fin, tipo, estado, recordatorio_minutos, recordatorio_canal, telefono_recordatorio, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11, NOW())
        RETURNING *`,
-      [user.cliente_id || 1, user.id, leadId || null, titulo, descripcion || null, fecha_inicio, fecha_fin, tipo || 'manual']
+      [
+        user.cliente_id || 1,
+        user.id,
+        leadId || null,
+        titulo,
+        descripcion || null,
+        fecha_inicio,
+        fecha_fin,
+        tipo || 'manual',
+        recordatorio_minutos || 120, // Por defecto 2 horas
+        recordatorio_canal || 'whatsapp',
+        telefonoRecordatorio
+      ]
     )
 
     return NextResponse.json(result, { status: 201 })
