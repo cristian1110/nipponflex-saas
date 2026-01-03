@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
       SELECT
         c.id, c.titulo, c.fecha_inicio, c.recordatorio_canal,
         c.telefono_recordatorio, c.recordatorio_minutos,
+        c.recordatorio_mensaje,
         l.telefono as lead_telefono, l.nombre as lead_nombre,
         cl.id as cliente_id,
         iw.evolution_instance, iw.evolution_api_key
@@ -35,6 +36,7 @@ export async function POST(request: NextRequest) {
       LEFT JOIN instancias_whatsapp iw ON iw.cliente_id = cl.id AND iw.estado = 'conectado'
       WHERE c.estado IN ('pendiente', 'confirmada')
         AND c.recordatorio_enviado = false
+        AND COALESCE(c.recordatorio_activo, true) = true
         AND COALESCE(c.recordatorio_minutos, 120) > 0
         AND c.fecha_inicio > NOW()
         AND c.fecha_inicio <= NOW() + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
@@ -74,7 +76,18 @@ export async function POST(request: NextRequest) {
 
       // Construir mensaje de recordatorio
       const nombreCliente = cita.lead_nombre || 'Estimado cliente'
-      const mensaje = `🔔 *Recordatorio de Cita*
+      let mensaje: string
+
+      if (cita.recordatorio_mensaje) {
+        // Usar mensaje personalizado con variables
+        mensaje = cita.recordatorio_mensaje
+          .replace(/\[TITULO\]/gi, cita.titulo)
+          .replace(/\[FECHA\]/gi, fechaFormateada)
+          .replace(/\[HORA\]/gi, horaFormateada)
+          .replace(/\[NOMBRE\]/gi, nombreCliente)
+      } else {
+        // Mensaje por defecto
+        mensaje = `🔔 *Recordatorio de Cita*
 
 Hola ${nombreCliente},
 
@@ -87,6 +100,7 @@ Te recordamos que tienes una cita programada:
 Por favor, confirma tu asistencia respondiendo a este mensaje.
 
 ¡Te esperamos!`
+      }
 
       try {
         if (canal === 'whatsapp' && cita.evolution_instance) {
@@ -159,6 +173,7 @@ export async function GET() {
     FROM citas
     WHERE estado IN ('pendiente', 'confirmada')
       AND recordatorio_enviado = false
+      AND COALESCE(recordatorio_activo, true) = true
       AND COALESCE(recordatorio_minutos, 120) > 0
       AND fecha_inicio > NOW()
       AND fecha_inicio <= NOW() + (COALESCE(recordatorio_minutos, 120) || ' minutes')::interval

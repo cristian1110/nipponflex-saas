@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const estado = searchParams.get('estado')
 
     let sql = `
-      SELECT 
+      SELECT
         c.id,
         c.titulo,
         c.descripcion,
@@ -27,7 +27,12 @@ export async function GET(request: NextRequest) {
         c.lead_id,
         l.nombre as lead_nombre,
         l.telefono as lead_telefono,
-        c.created_at
+        c.created_at,
+        COALESCE(c.recordatorio_activo, true) as recordatorio_activo,
+        COALESCE(c.recordatorio_minutos, 120) as recordatorio_minutos,
+        COALESCE(c.recordatorio_canal, 'whatsapp') as recordatorio_canal,
+        c.recordatorio_mensaje,
+        c.telefono_recordatorio
       FROM citas c
       LEFT JOIN leads l ON c.lead_id = l.id
       WHERE c.cliente_id = $1
@@ -132,7 +137,11 @@ export async function PUT(request: NextRequest) {
     }
 
     const data = await request.json()
-    const { id, titulo, descripcion, fecha, hora, duracion, estado } = data
+    const {
+      id, titulo, descripcion, fecha, hora, duracion, estado,
+      recordatorio_activo, recordatorio_minutos, recordatorio_canal,
+      recordatorio_mensaje, telefono_recordatorio
+    } = data
 
     if (!id) {
       return NextResponse.json({ error: 'ID es requerido' }, { status: 400 })
@@ -162,12 +171,41 @@ export async function PUT(request: NextRequest) {
       const dur = duracion || 30
       const endDate = new Date(fecha_inicio)
       endDate.setMinutes(endDate.getMinutes() + dur)
-      
+
       updates.push(`fecha_inicio = $${paramIndex++}`)
       params.push(fecha_inicio)
-      
+
       updates.push(`fecha_fin = $${paramIndex++}`)
       params.push(endDate.toISOString())
+
+      // Reset recordatorio_enviado si cambia la fecha/hora
+      updates.push(`recordatorio_enviado = false`)
+    }
+
+    // Campos de recordatorio
+    if (recordatorio_activo !== undefined) {
+      updates.push(`recordatorio_activo = $${paramIndex++}`)
+      params.push(recordatorio_activo)
+    }
+
+    if (recordatorio_minutos !== undefined) {
+      updates.push(`recordatorio_minutos = $${paramIndex++}`)
+      params.push(recordatorio_minutos)
+    }
+
+    if (recordatorio_canal !== undefined) {
+      updates.push(`recordatorio_canal = $${paramIndex++}`)
+      params.push(recordatorio_canal)
+    }
+
+    if (recordatorio_mensaje !== undefined) {
+      updates.push(`recordatorio_mensaje = $${paramIndex++}`)
+      params.push(recordatorio_mensaje || null)
+    }
+
+    if (telefono_recordatorio !== undefined) {
+      updates.push(`telefono_recordatorio = $${paramIndex++}`)
+      params.push(telefono_recordatorio?.replace(/\D/g, '') || null)
     }
 
     updates.push(`updated_at = NOW()`)

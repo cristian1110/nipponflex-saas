@@ -19,6 +19,12 @@ interface Cita {
   estado: 'pendiente' | 'confirmada' | 'completada' | 'cancelada'
   origen: string
   created_at: string
+  // Campos de recordatorio
+  recordatorio_activo?: boolean
+  recordatorio_minutos?: number
+  recordatorio_canal?: string
+  recordatorio_mensaje?: string
+  telefono_recordatorio?: string
 }
 
 export default function CalendarioPage() {
@@ -204,7 +210,13 @@ export default function CalendarioPage() {
           fecha: editingCita.fecha,
           hora: editingCita.hora,
           duracion: editingCita.duracion,
-          estado: editingCita.estado
+          estado: editingCita.estado,
+          // Campos de recordatorio
+          recordatorio_activo: editingCita.recordatorio_activo,
+          recordatorio_minutos: editingCita.recordatorio_minutos,
+          recordatorio_canal: editingCita.recordatorio_canal,
+          recordatorio_mensaje: editingCita.recordatorio_mensaje,
+          telefono_recordatorio: editingCita.telefono_recordatorio
         })
       })
       if (res.ok) {
@@ -562,8 +574,8 @@ export default function CalendarioPage() {
       )}
 
       {showEditCita && editingCita && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--bg-secondary)] rounded-xl p-5 w-full max-w-md">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-[var(--bg-secondary)] rounded-xl p-5 w-full max-w-md my-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between mb-4">
               <h3 className="font-bold text-[var(--text-primary)]">Editar Cita</h3>
               <button onClick={() => { setShowEditCita(false); setEditingCita(null) }} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)]">✕</button>
@@ -606,6 +618,73 @@ export default function CalendarioPage() {
               <div>
                 <label className="text-xs text-[var(--text-secondary)]">Descripción</label>
                 <textarea value={editingCita.descripcion || ''} onChange={(e) => setEditingCita({ ...editingCita, descripcion: e.target.value })} rows={2} className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] resize-none" />
+              </div>
+
+              {/* Sección de Recordatorio */}
+              <div className="pt-3 border-t border-[var(--border-color)]">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-xs text-[var(--text-secondary)] font-medium">🔔 Recordatorio al cliente</label>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingCita.recordatorio_activo !== false}
+                      onChange={(e) => setEditingCita({ ...editingCita, recordatorio_activo: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+
+                {editingCita.recordatorio_activo !== false && (
+                  <div className="space-y-3 bg-[var(--bg-primary)] rounded-lg p-3">
+                    <div>
+                      <label className="text-xs text-[var(--text-tertiary)]">Teléfono para recordatorio</label>
+                      <input
+                        type="tel"
+                        placeholder="+593..."
+                        value={editingCita.telefono_recordatorio || editingCita.lead_telefono || ''}
+                        onChange={(e) => setEditingCita({ ...editingCita, telefono_recordatorio: e.target.value })}
+                        className="w-full mt-1 px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-[var(--text-tertiary)]">Cuándo enviar</label>
+                        <select
+                          value={editingCita.recordatorio_minutos || 120}
+                          onChange={(e) => setEditingCita({ ...editingCita, recordatorio_minutos: Number(e.target.value) })}
+                          className="w-full mt-1 px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                        >
+                          {opcionesRecordatorio.filter(o => o.valor > 0).map(op => (
+                            <option key={op.valor} value={op.valor}>{op.texto}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-[var(--text-tertiary)]">Canal</label>
+                        <select
+                          value={editingCita.recordatorio_canal || 'whatsapp'}
+                          onChange={(e) => setEditingCita({ ...editingCita, recordatorio_canal: e.target.value })}
+                          className="w-full mt-1 px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                        >
+                          <option value="whatsapp">WhatsApp</option>
+                          <option value="sms">SMS</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-[var(--text-tertiary)]">Mensaje personalizado (opcional)</label>
+                      <textarea
+                        placeholder="Hola, te recordamos tu cita de [TITULO] el [FECHA] a las [HORA]..."
+                        value={editingCita.recordatorio_mensaje || ''}
+                        onChange={(e) => setEditingCita({ ...editingCita, recordatorio_mensaje: e.target.value })}
+                        rows={2}
+                        className="w-full mt-1 px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] resize-none"
+                      />
+                      <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Variables: [TITULO], [FECHA], [HORA], [NOMBRE]</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex gap-2 mt-4">
