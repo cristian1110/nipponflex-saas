@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { queryOne } from '@/lib/db'
 import { redisHealthCheck } from '@/lib/redis'
 import { getAllQueuesStats, queuesHealthCheck } from '@/lib/queues'
+import { ragHealthCheck, ragStats } from '@/lib/rag'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +44,19 @@ export async function GET() {
     }
   } catch (error) {
     checks.services.queues = { status: 'error', message: (error as Error).message }
+  }
+
+  // Check Qdrant (RAG)
+  try {
+    const qdrantOk = await ragHealthCheck()
+    if (qdrantOk) {
+      const stats = await ragStats()
+      checks.services.qdrant = { status: 'ok', stats }
+    } else {
+      checks.services.qdrant = { status: 'unavailable' }
+    }
+  } catch (error) {
+    checks.services.qdrant = { status: 'error', message: (error as Error).message }
   }
 
   // Memory usage

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne, execute } from '@/lib/db'
-import { generarRespuestaIA, construirPromptSistema, mapearModelo } from '@/lib/ai'
+import { generarRespuestaIA, mapearModelo } from '@/lib/ai'
 import { enviarMensajeWhatsApp, enviarPresencia } from '@/lib/evolution'
 import {
   getPromptCitas,
@@ -8,6 +8,7 @@ import {
   limpiarRespuestaCita,
   crearCitaDesdeIA
 } from '@/lib/citas-ia'
+import { buscarContextoRelevante, construirPromptConRAG } from '@/lib/rag'
 
 // Webhook para recibir mensajes de Evolution API
 export async function POST(request: NextRequest) {
@@ -177,21 +178,20 @@ export async function POST(request: NextRequest) {
       [clienteId, numero]
     )
 
-    // Cargar base de conocimiento del agente
-    const conocimientos = await query(
-      `SELECT contenido_texto FROM conocimientos
-       WHERE agente_id = $1 AND activo = true AND contenido_texto IS NOT NULL
-       LIMIT 5`,
-      [agente.id]
-    )
+    // Buscar contexto relevante en base de conocimiento (RAG)
+    const contextoRelevante = await buscarContextoRelevante(texto, agente.id, 3, 0.2)
 
     // Construir mensajes para la IA (incluir instrucciones de citas)
     const promptBase = agente.prompt_sistema + getPromptCitas()
-    const promptSistema = construirPromptSistema(
+    const promptSistema = construirPromptConRAG(
       promptBase,
-      conocimientos.map(c => c.contenido_texto),
+      contextoRelevante,
       agente.nombre
     )
+
+    if (contextoRelevante.length > 0) {
+      console.log(`RAG: ${contextoRelevante.length} contextos relevantes encontrados`)
+    }
 
     const mensajesIA = [
       { role: 'system' as const, content: promptSistema },

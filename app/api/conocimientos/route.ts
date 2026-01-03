@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
+import { indexarConocimiento, eliminarConocimientoDeQdrant } from '@/lib/rag'
 
 export const dynamic = 'force-dynamic'
 
@@ -137,12 +138,27 @@ export async function POST(request: NextRequest) {
     // Guardar en BD
     const conocimiento = await queryOne(
       `INSERT INTO conocimientos (cliente_id, agente_id, nombre_archivo, tipo, contenido_texto, tamano_bytes, estado, activo)
-       VALUES ($1, $2, $3, $4, $5, $6, 'listo', true)
+       VALUES ($1, $2, $3, $4, $5, $6, 'procesando', true)
        RETURNING *`,
       [user.cliente_id, agente_id, file.name, extension, contenidoTexto, file.size]
     )
 
     console.log('Conocimiento guardado:', conocimiento?.id, '- Texto:', contenidoTexto.substring(0, 100) + '...')
+
+    // Indexar en Qdrant para búsqueda semántica (async, no bloquea)
+    indexarConocimiento({
+      id: conocimiento.id,
+      clienteId: user.cliente_id,
+      agenteId: parseInt(agente_id),
+      nombreArchivo: file.name,
+      contenido: contenidoTexto,
+    }).then(async (success) => {
+      // Actualizar estado en BD
+      await query(
+        `UPDATE conocimientos SET estado = $1 WHERE id = $2`,
+        [success ? 'listo' : 'error_indexacion', conocimiento.id]
+      )
+    }).catch(console.error)
 
     return NextResponse.json(conocimiento, { status: 201 })
   } catch (error) {
@@ -174,7 +190,10 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Conocimiento no encontrado' }, { status: 404 })
     }
 
-    // Eliminar conocimiento
+    // Eliminar de Qdrant primero
+    await eliminarConocimientoDeQdrant(parseInt(id))
+
+    // Eliminar conocimiento de BD
     await query(`DELETE FROM conocimientos WHERE id = $1`, [id])
 
     return NextResponse.json({ success: true, message: 'Archivo eliminado correctamente' })

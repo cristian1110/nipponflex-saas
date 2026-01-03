@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@qdrant/js-client-rest": "^1.16.2",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.66.4",
     "ioredis": "^5.8.2",
