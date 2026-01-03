@@ -169,6 +169,16 @@ export default function CampaniasTab() {
   const [selectedLeads, setSelectedLeads] = useState<number[]>([])
   const [csvData, setCsvData] = useState('')
 
+  // Filtros para segmentación
+  const [filtroEtapa, setFiltroEtapa] = useState<number>(0)
+  const [filtroPipeline, setFiltroPipeline] = useState<number>(0)
+  const [filtroOrigen, setFiltroOrigen] = useState<string>('')
+  const [filtroBusqueda, setFiltroBusqueda] = useState<string>('')
+  const [etapasFiltro, setEtapasFiltro] = useState<Etapa[]>([])
+
+  // Vista estadísticas
+  const [showEstadisticas, setShowEstadisticas] = useState(false)
+
   const categorias = ['todas', ...Array.from(new Set(PLANTILLAS_MENSAJE.map(p => p.categoria)))]
 
   useEffect(() => { loadCampanias(); loadPipelines(); loadAgentes() }, [])
@@ -203,9 +213,14 @@ export default function CampaniasTab() {
 
   const loadLeadsDisponibles = async () => {
     try {
-      const res = await fetch('/api/leads?limit=500')
+      let url = '/api/leads?limit=500'
+      if (filtroEtapa) url += `&etapa_id=${filtroEtapa}`
+      if (filtroPipeline) url += `&pipeline_id=${filtroPipeline}`
+      if (filtroOrigen) url += `&origen=${encodeURIComponent(filtroOrigen)}`
+      if (filtroBusqueda) url += `&search=${encodeURIComponent(filtroBusqueda)}`
+
+      const res = await fetch(url)
       const data = await res.json()
-      console.log('Leads response:', data)
       if (data.error) {
         console.error('Error cargando leads:', data.error)
         setLeadsDisponibles([])
@@ -218,6 +233,23 @@ export default function CampaniasTab() {
       setLeadsDisponibles([])
     }
   }
+
+  const loadEtapasFiltro = async (pipelineId: number) => {
+    if (!pipelineId) {
+      setEtapasFiltro([])
+      return
+    }
+    const res = await fetch(`/api/pipelines/etapas?pipeline_id=${pipelineId}`)
+    const data = await res.json()
+    setEtapasFiltro(Array.isArray(data) ? data : [])
+  }
+
+  // Recargar leads cuando cambian los filtros
+  useEffect(() => {
+    if (showImportar && importMode === 'leads') {
+      loadLeadsDisponibles()
+    }
+  }, [filtroEtapa, filtroPipeline, filtroOrigen])
 
   const loadCampaniaContactos = async (campaniaId: number) => {
     const res = await fetch(`/api/campanias/contactos?campania_id=${campaniaId}`)
@@ -433,10 +465,43 @@ export default function CampaniasTab() {
         </button>
       </div>
 
+      {/* Resumen de estadísticas */}
+      {campanias.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+          <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-color)]">
+            <div className="text-2xl font-bold text-[var(--text-primary)]">{campanias.length}</div>
+            <div className="text-xs text-[var(--text-tertiary)]">Campañas</div>
+          </div>
+          <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-color)]">
+            <div className="text-2xl font-bold text-emerald-400">{campanias.filter(c => c.estado === 'activa').length}</div>
+            <div className="text-xs text-[var(--text-tertiary)]">Activas</div>
+          </div>
+          <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-color)]">
+            <div className="text-2xl font-bold text-blue-400">{campanias.reduce((sum, c) => sum + (c.contactos_count || 0), 0)}</div>
+            <div className="text-xs text-[var(--text-tertiary)]">Total contactos</div>
+          </div>
+          <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-color)]">
+            <div className="text-2xl font-bold text-purple-400">{campanias.reduce((sum, c) => sum + (c.enviados_count || 0), 0)}</div>
+            <div className="text-xs text-[var(--text-tertiary)]">Contactados</div>
+          </div>
+          <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-color)]">
+            <div className="text-2xl font-bold text-green-400">
+              {campanias.reduce((sum, c) => sum + (c.respondidos_count || 0), 0)}
+              <span className="text-sm font-normal text-[var(--text-tertiary)] ml-1">
+                ({campanias.reduce((sum, c) => sum + (c.enviados_count || 0), 0) > 0
+                  ? Math.round((campanias.reduce((sum, c) => sum + (c.respondidos_count || 0), 0) / campanias.reduce((sum, c) => sum + (c.enviados_count || 0), 0)) * 100)
+                  : 0}%)
+              </span>
+            </div>
+            <div className="text-xs text-[var(--text-tertiary)]">Respondieron</div>
+          </div>
+        </div>
+      )}
+
       {/* Info del flujo */}
       <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-4">
         <p className="text-sm text-blue-300">
-          <strong>¿Cómo funciona?</strong> Cada día, en el horario y días configurados, el sistema contacta automáticamente la cantidad de contactos que definas. 
+          <strong>¿Cómo funciona?</strong> Cada día, en el horario y días configurados, el sistema contacta automáticamente la cantidad de contactos que definas.
           Cuando responden, la IA detecta su intención y los mueve a la etapa correspondiente del pipeline.
         </p>
       </div>
@@ -475,19 +540,42 @@ export default function CampaniasTab() {
                   </div>
                 </div>
                 
-                <div className="flex gap-4 text-center">
-                  <div>
-                    <div className="text-lg font-bold text-[var(--text-primary)]">{c.contactos_count || 0}</div>
-                    <div className="text-xs text-[var(--text-tertiary)]">Total</div>
+                <div className="flex flex-col gap-2 min-w-[200px]">
+                  <div className="flex gap-4 text-center">
+                    <div>
+                      <div className="text-lg font-bold text-[var(--text-primary)]">{c.contactos_count || 0}</div>
+                      <div className="text-xs text-[var(--text-tertiary)]">Total</div>
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-blue-400">{c.enviados_count || 0}</div>
+                      <div className="text-xs text-[var(--text-tertiary)]">Contactados</div>
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-emerald-400">{c.respondidos_count || 0}</div>
+                      <div className="text-xs text-[var(--text-tertiary)]">Respondieron</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-lg font-bold text-blue-400">{c.enviados_count || 0}</div>
-                    <div className="text-xs text-[var(--text-tertiary)]">Contactados</div>
-                  </div>
-                  <div>
-                    <div className="text-lg font-bold text-emerald-400">{c.respondidos_count || 0}</div>
-                    <div className="text-xs text-[var(--text-tertiary)]">Respondieron</div>
-                  </div>
+                  {/* Barra de progreso */}
+                  {(c.contactos_count || 0) > 0 && (
+                    <div className="w-full">
+                      <div className="h-2 bg-[var(--bg-primary)] rounded-full overflow-hidden">
+                        <div className="h-full flex">
+                          <div
+                            className="bg-emerald-500 transition-all"
+                            style={{ width: `${((c.respondidos_count || 0) / (c.contactos_count || 1)) * 100}%` }}
+                          />
+                          <div
+                            className="bg-blue-500 transition-all"
+                            style={{ width: `${(((c.enviados_count || 0) - (c.respondidos_count || 0)) / (c.contactos_count || 1)) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-between text-xs text-[var(--text-tertiary)] mt-1">
+                        <span>{Math.round(((c.enviados_count || 0) / (c.contactos_count || 1)) * 100)}% contactados</span>
+                        <span>{(c.enviados_count || 0) > 0 ? Math.round(((c.respondidos_count || 0) / (c.enviados_count || 1)) * 100) : 0}% resp.</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -808,10 +896,10 @@ export default function CampaniasTab() {
       {/* Modal Importar */}
       {showImportar && selectedCampania && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--bg-secondary)] rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+          <div className="bg-[var(--bg-secondary)] rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
             <div className="p-4 border-b border-[var(--border-color)] flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-[var(--text-primary)]">📥 Importar Contactos</h3>
-              <button onClick={() => { setShowImportar(false); setSelectedLeads([]) }} className="text-[var(--text-secondary)] text-xl">✕</button>
+              <h3 className="font-bold text-[var(--text-primary)]">📥 Importar Contactos a "{selectedCampania.nombre}"</h3>
+              <button onClick={() => { setShowImportar(false); setSelectedLeads([]); setFiltroEtapa(0); setFiltroPipeline(0); setFiltroOrigen('') }} className="text-[var(--text-secondary)] text-xl">✕</button>
             </div>
             <div className="p-4 flex-1 overflow-y-auto">
               <div className="flex gap-2 mb-4">
@@ -826,27 +914,103 @@ export default function CampaniasTab() {
               </div>
               {importMode === 'leads' ? (
                 <div>
-                  <div className="max-h-60 overflow-y-auto border border-[var(--border-color)] rounded-lg">
+                  {/* Filtros de segmentación */}
+                  <div className="bg-[var(--bg-primary)] rounded-lg p-3 mb-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm font-medium text-[var(--text-primary)]">🎯 Segmentar leads</span>
+                      <span className="text-xs text-[var(--text-tertiary)]">(opcional)</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-xs text-[var(--text-secondary)] mb-1">Pipeline</label>
+                        <select value={filtroPipeline}
+                          onChange={(e) => {
+                            const pId = Number(e.target.value)
+                            setFiltroPipeline(pId)
+                            setFiltroEtapa(0)
+                            loadEtapasFiltro(pId)
+                          }}
+                          className="w-full px-2 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-xs text-[var(--text-primary)]">
+                          <option value={0}>Todos</option>
+                          {pipelines.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-[var(--text-secondary)] mb-1">Etapa</label>
+                        <select value={filtroEtapa}
+                          onChange={(e) => setFiltroEtapa(Number(e.target.value))}
+                          disabled={!filtroPipeline}
+                          className="w-full px-2 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-xs text-[var(--text-primary)] disabled:opacity-50">
+                          <option value={0}>Todas</option>
+                          {etapasFiltro.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-[var(--text-secondary)] mb-1">Origen</label>
+                        <select value={filtroOrigen}
+                          onChange={(e) => setFiltroOrigen(e.target.value)}
+                          className="w-full px-2 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-xs text-[var(--text-primary)]">
+                          <option value="">Todos</option>
+                          <option value="WhatsApp">WhatsApp</option>
+                          <option value="Web">Web</option>
+                          <option value="Facebook">Facebook</option>
+                          <option value="Referido">Referido</option>
+                          <option value="Manual">Manual</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <input type="text" value={filtroBusqueda}
+                        onChange={(e) => setFiltroBusqueda(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && loadLeadsDisponibles()}
+                        placeholder="Buscar por nombre, teléfono o empresa..."
+                        className="w-full px-2 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-xs text-[var(--text-primary)]" />
+                    </div>
+                    <button onClick={loadLeadsDisponibles}
+                      className="mt-2 px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">
+                      🔍 Buscar
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-[var(--text-secondary)]">
+                      {leadsDisponibles.length} leads encontrados
+                    </span>
+                    {leadsDisponibles.length > 0 && (
+                      <button onClick={() => setSelectedLeads(
+                        selectedLeads.length === leadsDisponibles.length ? [] : leadsDisponibles.map(l => l.id)
+                      )}
+                        className="text-xs text-emerald-400 hover:underline">
+                        {selectedLeads.length === leadsDisponibles.length ? '✗ Deseleccionar todos' : `✓ Seleccionar todos (${leadsDisponibles.length})`}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-48 overflow-y-auto border border-[var(--border-color)] rounded-lg">
                     {leadsDisponibles.length === 0 ? (
-                      <p className="p-4 text-center text-[var(--text-tertiary)]">No hay leads. Agrega contactos primero.</p>
+                      <p className="p-4 text-center text-[var(--text-tertiary)]">
+                        {filtroPipeline || filtroEtapa || filtroOrigen ? 'No hay leads con estos filtros' : 'No hay leads. Agrega contactos primero.'}
+                      </p>
                     ) : leadsDisponibles.map(lead => (
                       <label key={lead.id} className="flex items-center gap-2 p-2 hover:bg-[var(--bg-primary)] cursor-pointer border-b border-[var(--border-color)] last:border-0">
                         <input type="checkbox" checked={selectedLeads.includes(lead.id)}
                           onChange={(e) => setSelectedLeads(e.target.checked ? [...selectedLeads, lead.id] : selectedLeads.filter(id => id !== lead.id))}
                           className="rounded" />
-                        <div className="flex-1">
-                          <div className="text-sm text-[var(--text-primary)]">{lead.nombre || 'Sin nombre'}</div>
-                          <div className="text-xs text-[var(--text-tertiary)]">{lead.numero_whatsapp || lead.telefono}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-[var(--text-primary)] truncate">{lead.nombre || 'Sin nombre'}</span>
+                            {lead.etapa_nombre && (
+                              <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">{lead.etapa_nombre}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
+                            <span>{lead.numero_whatsapp || lead.telefono}</span>
+                            {lead.origen && <span>• {lead.origen}</span>}
+                          </div>
                         </div>
                       </label>
                     ))}
                   </div>
-                  {leadsDisponibles.length > 0 && (
-                    <button onClick={() => setSelectedLeads(leadsDisponibles.map(l => l.id))}
-                      className="mt-2 text-xs text-emerald-400 hover:underline">
-                      ✓ Seleccionar todos ({leadsDisponibles.length})
-                    </button>
-                  )}
                 </div>
               ) : (
                 <div>

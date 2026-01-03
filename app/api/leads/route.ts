@@ -13,40 +13,80 @@ export async function GET(request: NextRequest) {
     const source = searchParams.get('source') || 'all'
     const limit = parseInt(searchParams.get('limit') || '500')
     const search = searchParams.get('search') || ''
-
-    console.log('API Leads - user:', user.cliente_id, 'source:', source, 'limit:', limit)
+    const etapa_id = searchParams.get('etapa_id')
+    const pipeline_id = searchParams.get('pipeline_id')
+    const origen = searchParams.get('origen')
 
     let results: any[] = []
 
     // Obtener de tabla leads
     if (source === 'all' || source === 'leads') {
-      const leads = await query(`
+      let sql = `
         SELECT
-          id, nombre, telefono as numero_whatsapp, email, empresa,
-          'lead' as origen, etapa_id, created_at
-        FROM leads
-        WHERE cliente_id = $1
-        ${search ? `AND (nombre ILIKE $2 OR telefono ILIKE $2 OR empresa ILIKE $2)` : ''}
-        ORDER BY created_at DESC
-        LIMIT $${search ? '3' : '2'}
-      `, search ? [user.cliente_id, `%${search}%`, limit] : [user.cliente_id, limit])
-      console.log('Leads encontrados:', leads.length)
+          l.id, l.nombre, l.telefono as numero_whatsapp, l.email, l.empresa,
+          l.origen, l.etapa_id, l.created_at,
+          e.nombre as etapa_nombre
+        FROM leads l
+        LEFT JOIN etapas_crm e ON l.etapa_id = e.id
+        WHERE l.cliente_id = $1
+      `
+      const params: any[] = [user.cliente_id]
+      let paramIdx = 2
+
+      if (search) {
+        sql += ` AND (l.nombre ILIKE $${paramIdx} OR l.telefono ILIKE $${paramIdx} OR l.empresa ILIKE $${paramIdx})`
+        params.push(`%${search}%`)
+        paramIdx++
+      }
+
+      if (etapa_id) {
+        sql += ` AND l.etapa_id = $${paramIdx}`
+        params.push(parseInt(etapa_id))
+        paramIdx++
+      }
+
+      if (pipeline_id) {
+        sql += ` AND l.pipeline_id = $${paramIdx}`
+        params.push(parseInt(pipeline_id))
+        paramIdx++
+      }
+
+      if (origen) {
+        sql += ` AND l.origen = $${paramIdx}`
+        params.push(origen)
+        paramIdx++
+      }
+
+      sql += ` ORDER BY l.created_at DESC LIMIT $${paramIdx}`
+      params.push(limit)
+
+      const leads = await query(sql, params)
       results = [...results, ...leads]
     }
 
-    // Obtener de tabla contactos
-    if (source === 'all' || source === 'contactos') {
-      const contactos = await query(`
+    // Obtener de tabla contactos (solo si no hay filtros de etapa/pipeline)
+    if ((source === 'all' || source === 'contactos') && !etapa_id && !pipeline_id) {
+      let sqlContactos = `
         SELECT
           id, nombre, telefono as numero_whatsapp, email, empresa,
-          'contacto' as origen, null as etapa_id, created_at
+          'contacto' as origen_tipo, null as etapa_id, created_at,
+          null as etapa_nombre
         FROM contactos
         WHERE cliente_id = $1
-        ${search ? `AND (nombre ILIKE $2 OR telefono ILIKE $2 OR empresa ILIKE $2)` : ''}
-        ORDER BY created_at DESC
-        LIMIT $${search ? '3' : '2'}
-      `, search ? [user.cliente_id, `%${search}%`, limit] : [user.cliente_id, limit])
-      console.log('Contactos encontrados:', contactos.length)
+      `
+      const paramsContactos: any[] = [user.cliente_id]
+      let pIdx = 2
+
+      if (search) {
+        sqlContactos += ` AND (nombre ILIKE $${pIdx} OR telefono ILIKE $${pIdx} OR empresa ILIKE $${pIdx})`
+        paramsContactos.push(`%${search}%`)
+        pIdx++
+      }
+
+      sqlContactos += ` ORDER BY created_at DESC LIMIT $${pIdx}`
+      paramsContactos.push(limit)
+
+      const contactos = await query(sqlContactos, paramsContactos)
       results = [...results, ...contactos]
     }
 
@@ -54,13 +94,9 @@ export async function GET(request: NextRequest) {
     results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     results = results.slice(0, limit)
 
-    console.log('Total resultados:', results.length)
-
     return NextResponse.json({
       leads: results,
-      total: results.length,
-      totalLeads: results.filter(r => r.origen === 'lead').length,
-      totalContactos: results.filter(r => r.origen === 'contacto').length
+      total: results.length
     })
   } catch (error) {
     console.error('Error API leads:', error)
