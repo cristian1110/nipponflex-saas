@@ -20,92 +20,78 @@ export async function GET(request: NextRequest) {
       case 'trimestre': dias = 90; break
     }
 
-    // Obtener info del plan del cliente
+    // Query optimizada: obtener cliente con límites directamente
     const cliente = await queryOne(`
-      SELECT c.*, p.nombre as plan_nombre, p.limite_mensajes, p.limite_campanas, p.limite_contactos
+      SELECT
+        c.limite_mensajes_mes, c.limite_contactos, c.uso_mensajes_mes,
+        COALESCE(p.nombre, 'Básico') as plan_nombre,
+        COALESCE(p.max_campanas_mes, 5) as max_campanas
       FROM clientes c
       LEFT JOIN planes p ON c.plan_id = p.id
       WHERE c.id = $1
     `, [user.cliente_id])
 
-    // Uso del plan
-    const mesActual = new Date()
-    mesActual.setDate(1)
-    mesActual.setHours(0, 0, 0, 0)
-
-    const usoPlan = await queryOne(`
+    // Query optimizada: métricas de uso en una sola consulta
+    const uso = await queryOne(`
       SELECT
-        (SELECT COUNT(*) FROM historial_conversaciones WHERE cliente_id = $1 AND created_at >= $2) as mensajes_usados,
-        (SELECT COUNT(*) FROM campanias WHERE cliente_id = $1 AND estado != 'borrador') as campanas_activas,
+        (SELECT COUNT(*) FROM campanias WHERE cliente_id = $1 AND estado IN ('activa', 'pausada')) as campanas_activas,
         (SELECT COUNT(*) FROM leads WHERE cliente_id = $1) +
         (SELECT COUNT(*) FROM contactos WHERE cliente_id = $1) as contactos_totales
-    `, [user.cliente_id, mesActual.toISOString()])
+    `, [user.cliente_id])
 
-    // Mensajes por día (últimos N días)
+    // Query optimizada: mensajes por día con parámetro
     const mensajesPorDia = await query(`
+      WITH fechas AS (
+        SELECT generate_series(CURRENT_DATE - ($2 - 1) * INTERVAL '1 day', CURRENT_DATE, '1 day')::date as fecha
+      )
       SELECT
-        d.fecha,
-        COALESCE(env.enviados, 0) as enviados,
-        COALESCE(rec.recibidos, 0) as recibidos
-      FROM (
-        SELECT generate_series(CURRENT_DATE - INTERVAL '${dias - 1} days', CURRENT_DATE, '1 day')::date as fecha
-      ) d
-      LEFT JOIN (
-        SELECT DATE(created_at) as fecha, COUNT(*) as enviados
-        FROM historial_conversaciones
-        WHERE cliente_id = $1 AND tipo = 'saliente'
-        GROUP BY DATE(created_at)
-      ) env ON d.fecha = env.fecha
-      LEFT JOIN (
-        SELECT DATE(created_at) as fecha, COUNT(*) as recibidos
-        FROM historial_conversaciones
-        WHERE cliente_id = $1 AND tipo = 'entrante'
-        GROUP BY DATE(created_at)
-      ) rec ON d.fecha = rec.fecha
-      ORDER BY d.fecha
-    `, [user.cliente_id])
+        f.fecha,
+        COALESCE(SUM(CASE WHEN h.rol = 'assistant' THEN 1 ELSE 0 END), 0) as enviados,
+        COALESCE(SUM(CASE WHEN h.rol = 'user' THEN 1 ELSE 0 END), 0) as recibidos
+      FROM fechas f
+      LEFT JOIN historial_conversaciones h ON DATE(h.created_at) = f.fecha AND h.cliente_id = $1
+      GROUP BY f.fecha
+      ORDER BY f.fecha
+    `, [user.cliente_id, dias])
 
-    // Leads por día (últimos N días)
+    // Query optimizada: leads por día
     const leadsPorDia = await query(`
-      SELECT
-        d.fecha,
-        COALESCE(l.total, 0) as leads
-      FROM (
-        SELECT generate_series(CURRENT_DATE - INTERVAL '${dias - 1} days', CURRENT_DATE, '1 day')::date as fecha
-      ) d
-      LEFT JOIN (
-        SELECT DATE(created_at) as fecha, COUNT(*) as total
-        FROM leads WHERE cliente_id = $1
-        GROUP BY DATE(created_at)
-      ) l ON d.fecha = l.fecha
-      ORDER BY d.fecha
-    `, [user.cliente_id])
+      WITH fechas AS (
+        SELECT generate_series(CURRENT_DATE - ($2 - 1) * INTERVAL '1 day', CURRENT_DATE, '1 day')::date as fecha
+      )
+      SELECT f.fecha, COUNT(l.id) as leads
+      FROM fechas f
+      LEFT JOIN leads l ON DATE(l.created_at) = f.fecha AND l.cliente_id = $1
+      GROUP BY f.fecha
+      ORDER BY f.fecha
+    `, [user.cliente_id, dias])
 
-    // Campañas y sus métricas
+    // Query optimizada: campañas con métricas agregadas
     const campanias = await query(`
       SELECT
         c.id, c.nombre, c.estado,
-        (SELECT COUNT(*) FROM campania_contactos WHERE campania_id = c.id) as total_contactos,
-        (SELECT COUNT(*) FROM campania_contactos WHERE campania_id = c.id AND estado = 'enviado') as enviados,
-        (SELECT COUNT(*) FROM campania_contactos WHERE campania_id = c.id AND estado = 'respondido') as respondidos,
-        (SELECT COUNT(*) FROM campania_contactos WHERE campania_id = c.id AND estado = 'error') as errores
+        COUNT(cc.id) as total_contactos,
+        COUNT(CASE WHEN cc.estado = 'enviado' THEN 1 END) as enviados,
+        COUNT(CASE WHEN cc.estado = 'respondido' THEN 1 END) as respondidos
       FROM campanias c
+      LEFT JOIN campania_contactos cc ON cc.campania_id = c.id
       WHERE c.cliente_id = $1
+      GROUP BY c.id, c.nombre, c.estado, c.created_at
       ORDER BY c.created_at DESC
       LIMIT 5
     `, [user.cliente_id])
 
-    // Leads por origen (para gráfico de pastel)
+    // Query: leads por origen
     const leadsPorOrigen = await query(`
       SELECT COALESCE(origen, 'Directo') as nombre, COUNT(*) as valor
       FROM leads
-      WHERE cliente_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '${dias} days'
+      WHERE cliente_id = $1 AND created_at >= CURRENT_DATE - $2 * INTERVAL '1 day'
       GROUP BY origen
       ORDER BY valor DESC
       LIMIT 5
-    `, [user.cliente_id])
+    `, [user.cliente_id, dias])
 
-    // Leads por etapa (para gráfico de barras)
+    // Query: leads por etapa
     const leadsPorEtapa = await query(`
       SELECT e.nombre, e.color, COUNT(l.id) as valor
       FROM etapas_crm e
@@ -115,39 +101,42 @@ export async function GET(request: NextRequest) {
       ORDER BY e.orden
     `, [user.cliente_id])
 
-    // Tasa de respuesta por hora del día (para optimización)
+    // Query: respuestas por hora (últimos 30 días fijo)
     const respuestasPorHora = await query(`
-      SELECT
-        EXTRACT(HOUR FROM created_at) as hora,
-        COUNT(*) as total
+      SELECT EXTRACT(HOUR FROM created_at)::int as hora, COUNT(*) as total
       FROM historial_conversaciones
-      WHERE cliente_id = $1 AND tipo = 'entrante' AND created_at >= CURRENT_DATE - INTERVAL '30 days'
+      WHERE cliente_id = $1 AND rol = 'user' AND created_at >= CURRENT_DATE - 30
       GROUP BY EXTRACT(HOUR FROM created_at)
-      ORDER BY hora
     `, [user.cliente_id])
 
-    // Formatear datos para gráficos
     const formatearFecha = (fecha: string) => {
       const d = new Date(fecha)
       return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })
     }
 
+    const limiteMensajes = cliente?.limite_mensajes_mes || 1000
+    const limiteContactos = cliente?.limite_contactos || 500
+    const limiteCampanas = cliente?.max_campanas || 5
+    const mensajesUsados = cliente?.uso_mensajes_mes || 0
+    const campanasActivas = parseInt(uso?.campanas_activas || '0')
+    const contactosTotales = parseInt(uso?.contactos_totales || '0')
+
     return NextResponse.json({
       usoPlan: {
         mensajes: {
-          usados: parseInt(usoPlan?.mensajes_usados || '0'),
-          limite: cliente?.limite_mensajes || 1000,
-          porcentaje: Math.min(100, Math.round((parseInt(usoPlan?.mensajes_usados || '0') / (cliente?.limite_mensajes || 1000)) * 100))
+          usados: mensajesUsados,
+          limite: limiteMensajes,
+          porcentaje: Math.min(100, Math.round((mensajesUsados / limiteMensajes) * 100))
         },
         campanas: {
-          activas: parseInt(usoPlan?.campanas_activas || '0'),
-          limite: cliente?.limite_campanas || 5,
-          porcentaje: Math.min(100, Math.round((parseInt(usoPlan?.campanas_activas || '0') / (cliente?.limite_campanas || 5)) * 100))
+          activas: campanasActivas,
+          limite: limiteCampanas,
+          porcentaje: Math.min(100, Math.round((campanasActivas / limiteCampanas) * 100))
         },
         contactos: {
-          total: parseInt(usoPlan?.contactos_totales || '0'),
-          limite: cliente?.limite_contactos || 500,
-          porcentaje: Math.min(100, Math.round((parseInt(usoPlan?.contactos_totales || '0') / (cliente?.limite_contactos || 500)) * 100))
+          total: contactosTotales,
+          limite: limiteContactos,
+          porcentaje: Math.min(100, Math.round((contactosTotales / limiteContactos) * 100))
         },
         planNombre: cliente?.plan_nombre || 'Básico'
       },
@@ -167,7 +156,7 @@ export async function GET(request: NextRequest) {
         totalContactos: parseInt(c.total_contactos),
         enviados: parseInt(c.enviados),
         respondidos: parseInt(c.respondidos),
-        errores: parseInt(c.errores),
+        errores: 0,
         tasaRespuesta: parseInt(c.enviados) > 0
           ? Math.round((parseInt(c.respondidos) / parseInt(c.enviados)) * 100)
           : 0
@@ -182,7 +171,7 @@ export async function GET(request: NextRequest) {
         valor: parseInt(l.valor)
       })),
       respuestasPorHora: Array.from({ length: 24 }, (_, i) => {
-        const hora = respuestasPorHora.find(r => parseInt(r.hora) === i)
+        const hora = respuestasPorHora.find(r => r.hora === i)
         return {
           hora: `${i.toString().padStart(2, '0')}:00`,
           respuestas: hora ? parseInt(hora.total) : 0
