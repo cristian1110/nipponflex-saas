@@ -55,11 +55,21 @@ export async function POST(request: NextRequest) {
       delay_max,
       contactos_por_dia,
       dias_sin_respuesta,
-      max_seguimientos
+      max_seguimientos,
+      // Nuevos campos multimedia
+      tipo_media,
+      media_url,
+      media_base64,
+      media_mimetype
     } = body
 
-    if (!nombre || !mensaje_plantilla || !pipeline_id) {
-      return NextResponse.json({ error: 'Nombre, mensaje y pipeline son requeridos' }, { status: 400 })
+    if (!nombre || !pipeline_id) {
+      return NextResponse.json({ error: 'Nombre y pipeline son requeridos' }, { status: 400 })
+    }
+
+    // Validar que tenga mensaje o media
+    if (!mensaje_plantilla && !media_url && !media_base64) {
+      return NextResponse.json({ error: 'Se requiere mensaje o media' }, { status: 400 })
     }
 
     const campania = await queryOne(`
@@ -68,15 +78,17 @@ export async function POST(request: NextRequest) {
         pipeline_id, etapa_inicial_id, agente_id,
         horario_inicio, horario_fin, dias_semana,
         delay_min, delay_max, contactos_por_dia,
-        dias_sin_respuesta, max_seguimientos, estado
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'borrador')
+        dias_sin_respuesta, max_seguimientos, estado,
+        tipo_media, media_url, media_base64, media_mimetype
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'borrador', $17, $18, $19, $20)
       RETURNING *
     `, [
-      user.cliente_id, nombre, descripcion, mensaje_plantilla, mensaje_seguimiento,
+      user.cliente_id, nombre, descripcion, mensaje_plantilla || '', mensaje_seguimiento,
       pipeline_id, etapa_inicial_id, agente_id,
       horario_inicio || '09:00', horario_fin || '18:00', dias_semana || '1,2,3,4,5',
       delay_min || 30, delay_max || 90, contactos_por_dia || 20,
-      dias_sin_respuesta || 3, max_seguimientos || 2
+      dias_sin_respuesta || 3, max_seguimientos || 2,
+      tipo_media || 'texto', media_url, media_base64, media_mimetype
     ])
 
     return NextResponse.json(campania, { status: 201 })

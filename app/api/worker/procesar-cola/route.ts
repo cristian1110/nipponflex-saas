@@ -20,7 +20,8 @@ export async function POST(request: NextRequest) {
     const bloqueados: any[] = []
 
     const mensajes = await query(`
-      SELECT cm.*, iw.evolution_instance, iw.evolution_api_key
+      SELECT cm.*, iw.evolution_instance, iw.evolution_api_key,
+             cm.tipo_media, cm.media_url, cm.media_base64, cm.media_mimetype
       FROM cola_mensajes cm
       LEFT JOIN instancias_whatsapp iw ON cm.instancia_id = iw.id
       WHERE cm.estado = 'pendiente'
@@ -141,16 +142,74 @@ async function enviarMensaje(msg: any): Promise<{ success: boolean; error?: stri
       return { success: false, error: 'API Key no configurada' }
     }
 
-    const response = await fetch(`${evolutionUrl}/message/sendText/${evolutionInstance}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-      body: JSON.stringify({ number: msg.numero_destino, text: msg.mensaje })
-    })
+    const tipoMedia = msg.tipo_media || 'texto'
 
-    if (!response.ok) {
-      return { success: false, error: `Error: ${response.status}` }
+    // Enviar según tipo de media
+    if (tipoMedia === 'imagen' || tipoMedia === 'image') {
+      const body: any = {
+        number: msg.numero_destino,
+        caption: msg.mensaje || '',
+        mediatype: 'image',
+      }
+
+      if (msg.media_url) {
+        body.media = msg.media_url
+      } else if (msg.media_base64) {
+        body.media = msg.media_base64.includes('base64,')
+          ? msg.media_base64
+          : `data:${msg.media_mimetype || 'image/jpeg'};base64,${msg.media_base64}`
+      }
+
+      const response = await fetch(`${evolutionUrl}/message/sendMedia/${evolutionInstance}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+        body: JSON.stringify(body)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        return { success: false, error: `Error imagen: ${response.status} - ${errorText}` }
+      }
+      return { success: true }
+
+    } else if (tipoMedia === 'audio') {
+      const body: any = {
+        number: msg.numero_destino,
+      }
+
+      if (msg.media_url) {
+        body.audio = msg.media_url
+      } else if (msg.media_base64) {
+        body.audio = msg.media_base64.includes('base64,')
+          ? msg.media_base64
+          : `data:${msg.media_mimetype || 'audio/ogg'};base64,${msg.media_base64}`
+      }
+
+      const response = await fetch(`${evolutionUrl}/message/sendWhatsAppAudio/${evolutionInstance}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+        body: JSON.stringify(body)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        return { success: false, error: `Error audio: ${response.status} - ${errorText}` }
+      }
+      return { success: true }
+
+    } else {
+      // Texto normal
+      const response = await fetch(`${evolutionUrl}/message/sendText/${evolutionInstance}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+        body: JSON.stringify({ number: msg.numero_destino, text: msg.mensaje })
+      })
+
+      if (!response.ok) {
+        return { success: false, error: `Error: ${response.status}` }
+      }
+      return { success: true }
     }
-    return { success: true }
   } catch (error: any) {
     return { success: false, error: error.message }
   }

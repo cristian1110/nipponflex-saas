@@ -101,3 +101,161 @@ export async function enviarPresencia(instancia: string, apiKey: string, numero:
     console.error('Error enviando presencia:', error)
   }
 }
+
+// ============================================
+// ENVÍO DE MULTIMEDIA
+// ============================================
+
+interface SendMediaOptions {
+  instancia: string
+  apiKey: string
+  numero: string
+  mediaUrl?: string       // URL pública de la imagen/audio
+  mediaBase64?: string    // Base64 de la imagen/audio
+  mimetype?: string       // Tipo MIME (image/jpeg, audio/ogg, etc.)
+  caption?: string        // Texto que acompaña la imagen
+  fileName?: string       // Nombre del archivo
+  delayMs?: number
+}
+
+export async function enviarImagenWhatsApp(options: SendMediaOptions): Promise<SendMessageResult> {
+  const { instancia, apiKey, numero, mediaUrl, mediaBase64, caption, delayMs = 0 } = options
+
+  if (delayMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+
+  const numeroFormateado = numero.includes('@') ? numero : `${numero}@s.whatsapp.net`
+
+  try {
+    const body: any = {
+      number: numeroFormateado,
+      caption: caption || '',
+    }
+
+    // Preferir URL sobre base64
+    if (mediaUrl) {
+      body.mediatype = 'image'
+      body.media = mediaUrl
+    } else if (mediaBase64) {
+      body.mediatype = 'image'
+      body.media = mediaBase64.includes('base64,') ? mediaBase64 : `data:image/jpeg;base64,${mediaBase64}`
+    } else {
+      return { success: false, error: 'No se proporcionó imagen' }
+    }
+
+    const response = await fetch(`${EVOLUTION_URL}/message/sendMedia/${instancia}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey,
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Error Evolution API (imagen):', response.status, errorText)
+      return { success: false, error: `Error ${response.status}: ${errorText}` }
+    }
+
+    const data = await response.json()
+    return { success: true, messageId: data.key?.id || data.messageId }
+  } catch (error) {
+    console.error('Error enviando imagen WhatsApp:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
+export async function enviarAudioWhatsApp(options: SendMediaOptions): Promise<SendMessageResult> {
+  const { instancia, apiKey, numero, mediaUrl, mediaBase64, delayMs = 0 } = options
+
+  if (delayMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+
+  const numeroFormateado = numero.includes('@') ? numero : `${numero}@s.whatsapp.net`
+
+  try {
+    const body: any = {
+      number: numeroFormateado,
+    }
+
+    if (mediaUrl) {
+      body.audio = mediaUrl
+    } else if (mediaBase64) {
+      body.audio = mediaBase64.includes('base64,') ? mediaBase64 : `data:audio/ogg;base64,${mediaBase64}`
+    } else {
+      return { success: false, error: 'No se proporcionó audio' }
+    }
+
+    const response = await fetch(`${EVOLUTION_URL}/message/sendWhatsAppAudio/${instancia}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey,
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Error Evolution API (audio):', response.status, errorText)
+      return { success: false, error: `Error ${response.status}: ${errorText}` }
+    }
+
+    const data = await response.json()
+    return { success: true, messageId: data.key?.id || data.messageId }
+  } catch (error) {
+    console.error('Error enviando audio WhatsApp:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
+export async function enviarDocumentoWhatsApp(options: SendMediaOptions): Promise<SendMessageResult> {
+  const { instancia, apiKey, numero, mediaUrl, mediaBase64, mimetype, fileName, caption, delayMs = 0 } = options
+
+  if (delayMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+
+  const numeroFormateado = numero.includes('@') ? numero : `${numero}@s.whatsapp.net`
+
+  try {
+    const body: any = {
+      number: numeroFormateado,
+      mediatype: 'document',
+      fileName: fileName || 'documento',
+      caption: caption || '',
+    }
+
+    if (mediaUrl) {
+      body.media = mediaUrl
+    } else if (mediaBase64) {
+      body.media = mediaBase64.includes('base64,') ? mediaBase64 : `data:${mimetype || 'application/pdf'};base64,${mediaBase64}`
+    } else {
+      return { success: false, error: 'No se proporcionó documento' }
+    }
+
+    const response = await fetch(`${EVOLUTION_URL}/message/sendMedia/${instancia}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey,
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Error Evolution API (documento):', response.status, errorText)
+      return { success: false, error: `Error ${response.status}: ${errorText}` }
+    }
+
+    const data = await response.json()
+    return { success: true, messageId: data.key?.id || data.messageId }
+  } catch (error) {
+    console.error('Error enviando documento WhatsApp:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}

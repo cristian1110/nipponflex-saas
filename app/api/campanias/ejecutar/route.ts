@@ -52,8 +52,9 @@ export async function POST(request: NextRequest) {
       await query(`
         INSERT INTO cola_mensajes (
           cliente_id, instancia_id, tipo, numero_destino, mensaje,
-          campania_id, campania_contacto_id, estado, prioridad, programado_para
-        ) VALUES ($1, $2, 'saliente', $3, $4, $5, $6, 'pendiente', 5, $7)
+          campania_id, campania_contacto_id, estado, prioridad, programado_para,
+          tipo_media, media_url, media_base64, media_mimetype
+        ) VALUES ($1, $2, 'saliente', $3, $4, $5, $6, 'pendiente', 5, $7, $8, $9, $10, $11)
       `, [
         user.cliente_id,
         instancia?.id || null,
@@ -61,7 +62,11 @@ export async function POST(request: NextRequest) {
         mensaje,
         campania_id,
         contacto.id,
-        programadoPara
+        programadoPara,
+        campania.tipo_media || 'texto',
+        campania.media_url,
+        campania.media_base64,
+        campania.media_mimetype
       ])
 
       await query(`UPDATE campania_contactos SET estado = 'enviando' WHERE id = $1`, [contacto.id])
