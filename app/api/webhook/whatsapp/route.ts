@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne, execute } from '@/lib/db'
 import { generarRespuestaIA, construirPromptSistema, mapearModelo } from '@/lib/ai'
 import { enviarMensajeWhatsApp, enviarPresencia } from '@/lib/evolution'
+import {
+  getPromptCitas,
+  extraerCitaDeRespuesta,
+  limpiarRespuestaCita,
+  crearCitaDesdeIA
+} from '@/lib/citas-ia'
 
 // Webhook para recibir mensajes de Evolution API
 export async function POST(request: NextRequest) {
@@ -179,9 +185,10 @@ export async function POST(request: NextRequest) {
       [agente.id]
     )
 
-    // Construir mensajes para la IA
+    // Construir mensajes para la IA (incluir instrucciones de citas)
+    const promptBase = agente.prompt_sistema + getPromptCitas()
     const promptSistema = construirPromptSistema(
-      agente.prompt_sistema,
+      promptBase,
       conocimientos.map(c => c.contenido_texto),
       agente.nombre
     )
@@ -215,6 +222,31 @@ export async function POST(request: NextRequest) {
     if (!respuestaIA.content) {
       console.error('Respuesta IA vacía')
       return NextResponse.json({ status: 'error', error: 'Respuesta IA vacía' })
+    }
+
+    // Verificar si la IA agendó una cita
+    let citaCreada = null
+    const citaDetectada = extraerCitaDeRespuesta(respuestaIA.content)
+
+    if (citaDetectada) {
+      console.log('Cita detectada en respuesta IA:', citaDetectada)
+
+      const resultadoCita = await crearCitaDesdeIA(
+        clienteId,
+        lead?.id || null,
+        numero,
+        citaDetectada
+      )
+
+      if (resultadoCita.success) {
+        citaCreada = resultadoCita.citaId
+        console.log('Cita creada automáticamente:', citaCreada)
+      } else {
+        console.error('Error creando cita:', resultadoCita.error)
+      }
+
+      // Limpiar la respuesta para no mostrar el bloque técnico al usuario
+      respuestaIA.content = limpiarRespuestaCita(respuestaIA.content)
     }
 
     // Enviar respuesta por WhatsApp
@@ -251,6 +283,7 @@ export async function POST(request: NextRequest) {
       lead_id: lead.id,
       respuesta_enviada: true,
       tokens_usados: respuestaIA.tokensUsados,
+      cita_creada: citaCreada,
     })
 
   } catch (error) {
