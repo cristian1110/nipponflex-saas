@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
               m.vision_costo_usd + m.elevenlabs_costo_usd + m.twilio_costo_usd) as total_costo
          FROM metricas_api m
          JOIN clientes c ON m.cliente_id = c.id
-         WHERE m.fecha >= CURRENT_DATE - $1
+         WHERE m.fecha >= CURRENT_DATE - $1::integer
          GROUP BY c.id, c.nombre_empresa
          ORDER BY total_costo DESC
          LIMIT 10`,

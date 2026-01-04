@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne, execute } from '@/lib/db'
-import { generarRespuestaIA, mapearModelo, transcribirAudio, analizarImagen } from '@/lib/ai'
-import { enviarMensajeWhatsApp, enviarPresencia } from '@/lib/evolution'
+import { generarRespuestaIA, mapearModelo, transcribirAudio, analizarImagen, analizarSentimiento } from '@/lib/ai'
+import { enviarMensajeWhatsApp, enviarPresencia, enviarAudioWhatsApp } from '@/lib/evolution'
 import {
   getPromptCitas,
   extraerCitaDeRespuesta,
@@ -10,6 +10,7 @@ import {
 } from '@/lib/citas-ia'
 import { buscarContextoRelevante, construirPromptConRAG } from '@/lib/rag'
 import { descargarMedia, base64ToBuffer, esAudioCompatible, esImagenCompatible } from '@/lib/media'
+import { generarAudio } from '@/lib/elevenlabs'
 
 // Webhook para recibir mensajes de Evolution API
 export async function POST(request: NextRequest) {
@@ -212,11 +213,20 @@ export async function POST(request: NextRequest) {
       [lead.id]
     )
 
-    // Buscar agente activo
-    const agente = await queryOne(
-      `SELECT * FROM agentes WHERE cliente_id = $1 AND estado = 'activo' LIMIT 1`,
+    // Buscar agente activo (preferir configuracion_agente, fallback a agentes)
+    let agente = await queryOne(
+      `SELECT *, voice_id, responder_con_audio FROM configuracion_agente
+       WHERE cliente_id = $1 AND activo = true LIMIT 1`,
       [clienteId]
     )
+
+    if (!agente) {
+      agente = await queryOne(
+        `SELECT *, voice_id, responder_con_audio FROM agentes
+         WHERE cliente_id = $1 AND estado = 'activo' LIMIT 1`,
+        [clienteId]
+      )
+    }
 
     if (!agente) {
       console.log('No hay agente activo para cliente:', clienteId)
@@ -272,12 +282,25 @@ export async function POST(request: NextRequest) {
     // Buscar contexto relevante en base de conocimiento (RAG)
     const contextoRelevante = await buscarContextoRelevante(texto, agente.id, 3, 0.2)
 
+    // Analizar sentimiento del mensaje del usuario
+    const sentimiento = await analizarSentimiento(texto)
+    console.log(`Sentimiento detectado: ${sentimiento.sentimiento} (${sentimiento.emocion})`)
+
+    // Obtener nombre del agente (priorizar nombre_custom sobre nombre_agente)
+    const nombreAgente = agente.nombre_custom || agente.nombre_agente || 'Asistente'
+
     // Construir mensajes para la IA (incluir instrucciones de citas)
     const promptBase = agente.prompt_sistema + getPromptCitas()
     const promptSistema = construirPromptConRAG(
       promptBase,
       contextoRelevante,
-      agente.nombre
+      nombreAgente,
+      {
+        sentimiento: {
+          tipo: sentimiento.emocion,
+          sugerencia: sentimiento.sugerencia
+        }
+      }
     )
 
     if (contextoRelevante.length > 0) {
@@ -341,18 +364,57 @@ export async function POST(request: NextRequest) {
       respuestaIA.content = limpiarRespuestaCita(respuestaIA.content)
     }
 
-    // Enviar respuesta por WhatsApp
-    const resultado = await enviarMensajeWhatsApp({
-      instancia: instancia.evolution_instance,
-      apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
-      numero,
-      mensaje: respuestaIA.content,
-      delayMs: 500 + Math.random() * 1500, // Delay aleatorio 0.5-2s para parecer más natural
-    })
+    // Enviar respuesta por WhatsApp (audio o texto según configuración)
+    let resultado
+    let enviadoComoAudio = false
 
-    if (!resultado.success) {
-      console.error('Error enviando mensaje:', resultado.error)
-      return NextResponse.json({ status: 'error', error: resultado.error })
+    if (agente.responder_con_audio && agente.voice_id && process.env.ELEVENLABS_API_KEY) {
+      // Mostrar "grabando audio..." al usuario
+      await enviarPresencia(
+        instancia.evolution_instance,
+        instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+        numero,
+        'recording'
+      )
+
+      // Generar audio con ElevenLabs
+      console.log('Generando audio con ElevenLabs para:', numero)
+      const audioGenerado = await generarAudio({
+        texto: respuestaIA.content,
+        voiceId: agente.voice_id,
+        clienteId: clienteId,
+      })
+
+      if (audioGenerado) {
+        // Enviar como nota de voz
+        const audioBase64 = audioGenerado.audioBuffer.toString('base64')
+        resultado = await enviarAudioWhatsApp({
+          instancia: instancia.evolution_instance,
+          apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+          numero,
+          mediaBase64: audioBase64,
+          mimetype: audioGenerado.contentType, // audio/mpeg
+          delayMs: 300,
+        })
+        enviadoComoAudio = resultado.success
+        console.log(`Audio generado: ${audioGenerado.caracteres} caracteres, costo: $${audioGenerado.costoUsd.toFixed(4)}`)
+      }
+    }
+
+    // Si no se envió como audio (o falló), enviar como texto
+    if (!enviadoComoAudio) {
+      resultado = await enviarMensajeWhatsApp({
+        instancia: instancia.evolution_instance,
+        apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+        numero,
+        mensaje: respuestaIA.content,
+        delayMs: 500 + Math.random() * 1500, // Delay aleatorio 0.5-2s para parecer más natural
+      })
+    }
+
+    if (!resultado?.success) {
+      console.error('Error enviando mensaje:', resultado?.error)
+      return NextResponse.json({ status: 'error', error: resultado?.error })
     }
 
     // Guardar respuesta en historial
@@ -374,6 +436,7 @@ export async function POST(request: NextRequest) {
       status: 'ok',
       lead_id: lead.id,
       respuesta_enviada: true,
+      enviado_como_audio: enviadoComoAudio,
       tokens_usados: respuestaIA.tokensUsados,
       cita_creada: citaCreada,
     })

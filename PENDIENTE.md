@@ -36,13 +36,14 @@
 - [ ] Selector de idioma en configuración
 - [ ] Detectar idioma del navegador
 
-### 2. Integración ElevenLabs (Clonación de Voz)
-- [ ] Crear cuenta en https://elevenlabs.io
-- [ ] Obtener API key
-- [ ] Agregar `ELEVENLABS_API_KEY` al .env
-- [ ] Crear `lib/elevenlabs.ts` para generar audio
-- [ ] Clonar voz del usuario/agente
-- [ ] Almacenar voice_id por agente
+### 2. Integración ElevenLabs (Clonación de Voz) ✅ COMPLETADO
+- [x] Crear cuenta en https://elevenlabs.io
+- [x] Obtener API key
+- [x] Agregar `ELEVENLABS_API_KEY` al .env
+- [x] Crear `lib/elevenlabs.ts` para generar audio
+- [x] UI en Agentes → Opciones para activar respuestas con audio
+- [x] Integrado en webhook WhatsApp - responde con notas de voz
+- [ ] Clonar voz personalizada del usuario (opcional, futuro)
 
 ### 3. Integración Twilio/Vonage (Llamadas)
 - [ ] Decidir: Twilio o Vonage (Twilio es más popular, Vonage más barato)
@@ -52,11 +53,11 @@
 - [ ] Webhook para recibir llamadas entrantes
 - [ ] Integrar con agente IA para responder
 
-### 4. Respuestas con Audio/Voz Clonada
-- [ ] Opción en configuración del agente: "Responder con audio"
-- [ ] Flujo: Texto IA → ElevenLabs → Audio → WhatsApp
-- [ ] Solo para planes que tengan `tiene_voz = true`
-- [ ] Límite de caracteres según plan
+### 4. Respuestas con Audio/Voz Clonada ✅ COMPLETADO
+- [x] Opción en configuración del agente: "Responder con audio"
+- [x] Selector de voz de ElevenLabs
+- [x] Flujo: Texto IA → ElevenLabs → Audio → WhatsApp
+- [ ] Límite de caracteres según plan (futuro)
 
 ---
 
@@ -74,7 +75,7 @@ WORKER_SECRET=nf_worker_secret_2025_secure
 
 ### Variables Pendientes por Agregar
 ```
-ELEVENLABS_API_KEY=pendiente
+ELEVENLABS_API_KEY=✅ Configurado
 TWILIO_ACCOUNT_SID=pendiente
 TWILIO_AUTH_TOKEN=pendiente
 TWILIO_PHONE_NUMBER=pendiente
@@ -88,10 +89,11 @@ lib/
 ├── embeddings.ts  # Jina embeddings
 ├── qdrant.ts      # Base de datos vectorial
 ├── rag.ts         # Búsqueda semántica
-├── elevenlabs.ts  # PENDIENTE: Clonación de voz
+├── elevenlabs.ts  # ✅ Text-to-Speech, clonación de voz
 ├── twilio.ts      # PENDIENTE: Llamadas telefónicas
 
-app/admin/metricas/page.tsx  # Dashboard de métricas (nuevo)
+app/admin/metricas/page.tsx     # Dashboard de métricas
+app/api/elevenlabs/voces/       # ✅ API para listar voces
 ```
 
 ### Base de Datos - Tablas Nuevas

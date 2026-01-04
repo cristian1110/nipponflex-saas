@@ -338,3 +338,89 @@ export async function analizarImagen(
     return null
   }
 }
+
+// ============================================
+// ANÁLISIS DE SENTIMIENTOS
+// ============================================
+
+export type Sentimiento = 'positivo' | 'negativo' | 'neutral' | 'frustrado' | 'confundido' | 'urgente'
+
+export interface AnalisisSentimiento {
+  sentimiento: Sentimiento
+  intensidad: number // 1-10
+  emocion: string
+  sugerencia: string
+}
+
+export async function analizarSentimiento(mensaje: string): Promise<AnalisisSentimiento> {
+  // Análisis rápido sin llamar a la API para mensajes simples
+  const mensajeLower = mensaje.toLowerCase()
+
+  // Detectar frustración/enojo
+  if (/molest|enoj|frust|harto|mal servicio|quejar|reclam|terrible|pésimo|horrible/i.test(mensaje)) {
+    return {
+      sentimiento: 'frustrado',
+      intensidad: 8,
+      emocion: 'frustración',
+      sugerencia: 'Responde con mucha empatía, discúlpate si es necesario y ofrece soluciones concretas.'
+    }
+  }
+
+  // Detectar urgencia
+  if (/urgent|emergencia|ahora mismo|ya|inmediato|rápido|pronto|ayuda/i.test(mensaje)) {
+    return {
+      sentimiento: 'urgente',
+      intensidad: 7,
+      emocion: 'urgencia',
+      sugerencia: 'Responde de forma directa y eficiente, prioriza dar una solución rápida.'
+    }
+  }
+
+  // Detectar confusión
+  if (/no entiendo|confund|cómo funciona|explica|qué significa|no sé|help|ayuda.*entender/i.test(mensaje)) {
+    return {
+      sentimiento: 'confundido',
+      intensidad: 5,
+      emocion: 'confusión',
+      sugerencia: 'Explica de forma clara y sencilla, usa ejemplos si es posible.'
+    }
+  }
+
+  // Detectar negatividad general
+  if (/no me gusta|mal|problema|error|falla|no funciona|no sirve/i.test(mensaje)) {
+    return {
+      sentimiento: 'negativo',
+      intensidad: 6,
+      emocion: 'insatisfacción',
+      sugerencia: 'Muestra comprensión por el problema y ofrece ayuda activa.'
+    }
+  }
+
+  // Detectar positividad
+  if (/gracias|excelente|genial|perfecto|increíble|bueno|me gusta|feliz|contento|👍|😊|🙂|❤️/i.test(mensaje)) {
+    return {
+      sentimiento: 'positivo',
+      intensidad: 7,
+      emocion: 'satisfacción',
+      sugerencia: 'Mantén el tono positivo y amigable, agradece su confianza.'
+    }
+  }
+
+  // Saludos y preguntas simples
+  if (/hola|buenos días|buenas tardes|buenas noches|qué tal|cómo estás/i.test(mensaje)) {
+    return {
+      sentimiento: 'positivo',
+      intensidad: 5,
+      emocion: 'cordialidad',
+      sugerencia: 'Responde de forma cálida y amigable, preséntate con tu nombre.'
+    }
+  }
+
+  // Neutral por defecto
+  return {
+    sentimiento: 'neutral',
+    intensidad: 5,
+    emocion: 'neutral',
+    sugerencia: 'Responde de forma profesional y amable.'
+  }
+}

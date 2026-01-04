@@ -123,12 +123,24 @@ export async function buscarContextoRelevante(
 // CONSTRUCCIÓN DE PROMPT CON RAG
 // ============================================
 
+export interface OpcionesPrompt {
+  sentimiento?: {
+    tipo: string
+    sugerencia: string
+  }
+}
+
 export function construirPromptConRAG(
   promptBase: string,
   contextos: ContextoRelevante[],
-  nombreAgente: string = 'Asistente'
+  nombreAgente: string = 'Asistente',
+  opciones?: OpcionesPrompt
 ): string {
-  let prompt = promptBase
+  let prompt = `## Tu Identidad
+Eres ${nombreAgente}, un asistente virtual amigable y profesional.
+IMPORTANTE: Cuando alguien te pregunte cómo te llamas, tu nombre, o quién eres, SIEMPRE responde que te llamas "${nombreAgente}".
+
+${promptBase}`
 
   // Agregar contexto relevante si existe
   if (contextos.length > 0) {
@@ -141,15 +153,26 @@ export function construirPromptConRAG(
     }
   }
 
+  // Agregar instrucciones de sentimiento si existen
+  if (opciones?.sentimiento) {
+    prompt += `\n## Estado Emocional del Usuario
+El usuario parece estar: ${opciones.sentimiento.tipo}
+Sugerencia de respuesta: ${opciones.sentimiento.sugerencia}
+`
+  }
+
   // Agregar instrucciones generales
-  prompt += `\n## Instrucciones
+  prompt += `\n## Instrucciones de Comportamiento
 - Responde siempre en español
-- Sé conciso y directo (máximo 2-3 párrafos)
+- Sé conciso y directo (máximo 2-3 párrafos para WhatsApp)
 - Si la información de la base de conocimiento es relevante, úsala
 - Si no sabes algo, dilo honestamente
 - No inventes información
-- Usa un tono amable y profesional
-- Tu nombre es ${nombreAgente}`
+- Comportate como un humano real, cálido y cercano
+- Usa un tono conversacional y amigable, como si hablaras con un amigo
+- Puedes usar expresiones como "¡Claro!", "Por supuesto", "Con gusto"
+- Si el usuario está frustrado, muestra empatía genuina
+- Tu nombre es ${nombreAgente} - úsalo cuando te presentes o te pregunten`
 
   return prompt
 }

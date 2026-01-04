@@ -278,7 +278,7 @@ export async function obtenerResumenGlobal(dias: number = 30): Promise<any> {
       SUM(groq_costo_usd + jina_costo_usd + whisper_costo_usd + vision_costo_usd +
           elevenlabs_costo_usd + twilio_costo_usd) as costo_total
      FROM metricas_api
-     WHERE fecha >= CURRENT_DATE - $1`,
+     WHERE fecha >= CURRENT_DATE - $1::integer`,
     [dias]
   )
 
@@ -303,7 +303,7 @@ export async function obtenerMetricasPorDia(dias: number = 30, clienteId?: numbe
           elevenlabs_costo_usd + twilio_costo_usd) as costo,
       SUM(whatsapp_mensajes_enviados + whatsapp_mensajes_recibidos) as mensajes
      FROM metricas_api
-     WHERE fecha >= CURRENT_DATE - $1 ${whereCliente}
+     WHERE fecha >= CURRENT_DATE - $1::integer ${whereCliente}
      GROUP BY fecha
      ORDER BY fecha ASC`,
     params

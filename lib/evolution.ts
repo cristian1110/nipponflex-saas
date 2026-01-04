@@ -168,7 +168,7 @@ export async function enviarImagenWhatsApp(options: SendMediaOptions): Promise<S
 }
 
 export async function enviarAudioWhatsApp(options: SendMediaOptions): Promise<SendMessageResult> {
-  const { instancia, apiKey, numero, mediaUrl, mediaBase64, delayMs = 0 } = options
+  const { instancia, apiKey, numero, mediaUrl, mediaBase64, mimetype = 'audio/mpeg', delayMs = 0 } = options
 
   if (delayMs > 0) {
     await new Promise(resolve => setTimeout(resolve, delayMs))
@@ -179,17 +179,22 @@ export async function enviarAudioWhatsApp(options: SendMediaOptions): Promise<Se
   try {
     const body: any = {
       number: numeroFormateado,
+      mediatype: 'audio',
+      mimetype: mimetype || 'audio/mpeg',
     }
 
     if (mediaUrl) {
-      body.audio = mediaUrl
+      body.media = mediaUrl
     } else if (mediaBase64) {
-      body.audio = mediaBase64.includes('base64,') ? mediaBase64 : `data:audio/ogg;base64,${mediaBase64}`
+      // Evolution API espera base64 puro sin prefijo data:
+      body.media = mediaBase64.includes('base64,')
+        ? mediaBase64.split('base64,')[1]
+        : mediaBase64
     } else {
       return { success: false, error: 'No se proporcionó audio' }
     }
 
-    const response = await fetch(`${EVOLUTION_URL}/message/sendWhatsAppAudio/${instancia}`, {
+    const response = await fetch(`${EVOLUTION_URL}/message/sendMedia/${instancia}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

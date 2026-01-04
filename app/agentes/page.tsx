@@ -30,6 +30,14 @@ interface Agente {
   mensaje_fuera_horario: string
   opciones_tipo: any
   activo: boolean
+  voice_id: string | null
+  responder_con_audio: boolean
+}
+
+interface VozElevenLabs {
+  voice_id: string
+  name: string
+  labels?: { gender?: string; language?: string }
 }
 
 interface Conocimiento {
@@ -61,6 +69,8 @@ export default function AgentesPage() {
   const [conocimientos, setConocimientos] = useState<Conocimiento[]>([])
   const [conocimientosTemp, setConocimientosTemp] = useState<File[]>([])
   const [limites, setLimites] = useState<Limites>({ max_agentes: 1, agentes_actuales: 0, puede_crear: true, max_archivos: 3, max_tamano_mb: 2 })
+  const [voces, setVoces] = useState<VozElevenLabs[]>([])
+  const [vocesApiConfigurada, setVocesApiConfigurada] = useState(false)
   
   const [showCrear, setShowCrear] = useState(false)
   const [showEditar, setShowEditar] = useState(false)
@@ -124,6 +134,17 @@ export default function AgentesPage() {
     try {
       const res = await fetch(`/api/conocimientos?agente_id=${agenteId}`)
       if (res.ok) setConocimientos(await res.json())
+    } catch (e) { console.error(e) }
+  }
+
+  const loadVoces = async () => {
+    try {
+      const res = await fetch('/api/elevenlabs/voces')
+      if (res.ok) {
+        const data = await res.json()
+        setVoces(data.voces || [])
+        setVocesApiConfigurada(data.api_configurada)
+      }
     } catch (e) { console.error(e) }
   }
 
@@ -241,6 +262,7 @@ export default function AgentesPage() {
     setSelectedAgente(agente)
     setActiveTab('general')
     loadConocimientos(agente.id)
+    loadVoces()
     setShowEditar(true)
   }
 
@@ -648,9 +670,62 @@ export default function AgentesPage() {
               )}
 
               {activeTab === 'opciones' && (
-                <div className="text-center py-8">
-                  <div className="text-4xl mb-2">🚧</div>
-                  <p className="text-[var(--text-secondary)]">Opciones avanzadas próximamente</p>
+                <div className="space-y-6">
+                  {/* Respuestas con Audio */}
+                  <div className="p-4 bg-[var(--bg-primary)] rounded-lg border border-[var(--border-color)]">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">🔊</span>
+                        <div>
+                          <h4 className="font-medium text-[var(--text-primary)]">Respuestas con Audio</h4>
+                          <p className="text-sm text-[var(--text-secondary)]">El agente responderá con notas de voz en WhatsApp</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setSelectedAgente({ ...selectedAgente, responder_con_audio: !selectedAgente.responder_con_audio })}
+                        className={`relative w-12 h-6 rounded-full transition-colors ${selectedAgente.responder_con_audio ? 'bg-emerald-600' : 'bg-gray-600'}`}
+                      >
+                        <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${selectedAgente.responder_con_audio ? 'translate-x-7' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+
+                    {selectedAgente.responder_con_audio && (
+                      <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
+                        <label className="block text-sm text-[var(--text-secondary)] mb-2">Seleccionar voz</label>
+                        {!vocesApiConfigurada && (
+                          <div className="mb-3 p-2 bg-yellow-500/20 text-yellow-400 rounded text-sm">
+                            ⚠️ API de ElevenLabs no configurada. Agrega ELEVENLABS_API_KEY al .env
+                          </div>
+                        )}
+                        <select
+                          value={selectedAgente.voice_id || ''}
+                          onChange={(e) => setSelectedAgente({ ...selectedAgente, voice_id: e.target.value || null })}
+                          className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
+                        >
+                          <option value="">Seleccionar voz...</option>
+                          {voces.map(voz => (
+                            <option key={voz.voice_id} value={voz.voice_id}>
+                              {voz.name} {voz.labels?.gender ? `(${voz.labels.gender})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-[var(--text-tertiary)] mt-2">
+                          Usa ElevenLabs para generar audio con voz natural. Costo aprox: $0.00003/carácter
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Otras opciones futuras */}
+                  <div className="p-4 bg-[var(--bg-primary)] rounded-lg border border-[var(--border-color)] opacity-50">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">📞</span>
+                      <div>
+                        <h4 className="font-medium text-[var(--text-primary)]">Llamadas telefónicas</h4>
+                        <p className="text-sm text-[var(--text-secondary)]">Próximamente: El agente podrá hacer y recibir llamadas</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
