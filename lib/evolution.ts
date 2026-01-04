@@ -217,6 +217,43 @@ export async function enviarAudioWhatsApp(options: SendMediaOptions): Promise<Se
   }
 }
 
+// Función unificada para enviar cualquier tipo de media
+interface SendUnifiedMediaOptions {
+  instancia: string
+  apiKey: string
+  numero: string
+  caption?: string
+  mediaType: 'image' | 'audio' | 'document'
+  mediaUrl?: string
+  mediaBase64?: string
+  mediaMimetype?: string
+}
+
+export async function enviarMediaWhatsApp(options: SendUnifiedMediaOptions): Promise<SendMessageResult> {
+  const { mediaType, ...mediaOptions } = options
+
+  switch (mediaType) {
+    case 'image':
+      return enviarImagenWhatsApp({
+        ...mediaOptions,
+        caption: options.caption,
+      })
+    case 'audio':
+      return enviarAudioWhatsApp({
+        ...mediaOptions,
+        mimetype: options.mediaMimetype,
+      })
+    case 'document':
+      return enviarDocumentoWhatsApp({
+        ...mediaOptions,
+        mimetype: options.mediaMimetype,
+        caption: options.caption,
+      })
+    default:
+      return { success: false, error: `Tipo de media no soportado: ${mediaType}` }
+  }
+}
+
 export async function enviarDocumentoWhatsApp(options: SendMediaOptions): Promise<SendMessageResult> {
   const { instancia, apiKey, numero, mediaUrl, mediaBase64, mimetype, fileName, caption, delayMs = 0 } = options
 

@@ -14,9 +14,9 @@ const connection = new Redis(REDIS_URL, { maxRetriesPerRequest: null })
 export const mensajesWorker = new Worker<MensajeWhatsAppJob>(
   'mensajes-whatsapp',
   async (job: Job<MensajeWhatsAppJob>) => {
-    const { clienteId, numero, mensaje, campaniaId, campaniaContactoId } = job.data
+    const { clienteId, numero, mensaje, campaniaId, campaniaContactoId, mediaType, mediaUrl, mediaBase64, mediaMimetype } = job.data as any
 
-    console.log(`[Worker Mensajes] Procesando job ${job.id} para ${numero}`)
+    console.log(`[Worker Mensajes] Procesando job ${job.id} para ${numero}${mediaType ? ` (${mediaType})` : ''}`)
 
     // Verificar límite del cliente
     const cliente = await query(
@@ -44,13 +44,30 @@ export const mensajesWorker = new Worker<MensajeWhatsAppJob>(
       throw new Error('No hay instancia WhatsApp conectada')
     }
 
-    // Enviar mensaje
-    const resultado = await enviarMensajeWhatsApp({
-      instancia: instancia[0].evolution_instance,
-      apiKey: instancia[0].evolution_api_key || process.env.EVOLUTION_API_KEY || '',
-      numero,
-      mensaje,
-    })
+    // Enviar mensaje (con o sin multimedia)
+    let resultado
+    if (mediaType && (mediaUrl || mediaBase64)) {
+      // Enviar con multimedia
+      const { enviarMediaWhatsApp } = await import('./evolution')
+      resultado = await enviarMediaWhatsApp({
+        instancia: instancia[0].evolution_instance,
+        apiKey: instancia[0].evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+        numero,
+        caption: mensaje,
+        mediaType,
+        mediaUrl,
+        mediaBase64,
+        mediaMimetype,
+      })
+    } else {
+      // Enviar solo texto
+      resultado = await enviarMensajeWhatsApp({
+        instancia: instancia[0].evolution_instance,
+        apiKey: instancia[0].evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+        numero,
+        mensaje,
+      })
+    }
 
     if (!resultado.success) {
       throw new Error(resultado.error || 'Error enviando mensaje')
@@ -161,33 +178,66 @@ export const campaniasWorker = new Worker<CampaniaJob>(
         return { skipped: true, reason: 'Campaña no activa' }
       }
 
-      // Obtener contactos pendientes
+      // Obtener contactos pendientes en ORDEN ALEATORIO
+      // Esto evita patrones predecibles (siempre contactar en el mismo orden)
       const contactos = await query(
         `SELECT * FROM campania_contactos
          WHERE campania_id = $1 AND estado = 'pendiente'
-         ORDER BY id LIMIT $2`,
+         ORDER BY RANDOM() LIMIT $2`,
         [campaniaId, campania[0].contactos_por_dia || 20]
       )
 
-      // Encolar mensajes con delay entre cada uno
+      // Encolar mensajes con delays ALEATORIOS para simular comportamiento humano
+      // Esto evita detección de patrones por Meta/WhatsApp
       const { encolarMensajeWhatsApp } = await import('./queues')
+
+      // Configuración de delays aleatorios
+      const delayMinMs = (campania[0].delay_min || 30) * 1000 // Mínimo en ms
+      const delayMaxMs = (campania[0].delay_max || 90) * 1000 // Máximo en ms
+
+      let acumulatedDelay = 0
 
       for (let i = 0; i < contactos.length; i++) {
         const contacto = contactos[i] as any
-        const delay = i * 30000 // 30 segundos entre mensajes
+
+        // Delay aleatorio entre min y max para cada mensaje
+        // Añadimos variación adicional (±20%) para más naturalidad
+        const baseDelay = delayMinMs + Math.random() * (delayMaxMs - delayMinMs)
+        const variation = baseDelay * (0.8 + Math.random() * 0.4) // ±20%
+        const randomDelay = Math.floor(variation)
+
+        acumulatedDelay += randomDelay
 
         const mensaje = (campania[0].mensaje_plantilla || '')
           .replace(/\[NOMBRE\]/gi, contacto.nombre || 'Hola')
           .replace(/\[EMPRESA\]/gi, contacto.empresa || '')
 
-        await encolarMensajeWhatsApp({
+        // Preparar datos del mensaje incluyendo multimedia si existe
+        const mensajeData: any = {
           clienteId,
           instanciaId: 0,
           numero: contacto.numero_whatsapp,
           mensaje,
           campaniaId,
           campaniaContactoId: contacto.id,
-        }, delay)
+        }
+
+        // Agregar multimedia si la campaña tiene imagen o audio
+        if (campania[0].tipo_media === 'imagen' && (campania[0].media_url || campania[0].media_base64)) {
+          mensajeData.mediaType = 'image'
+          mensajeData.mediaUrl = campania[0].media_url
+          mensajeData.mediaBase64 = campania[0].media_base64
+          mensajeData.mediaMimetype = campania[0].media_mimetype
+        } else if (campania[0].tipo_media === 'audio' && (campania[0].media_url || campania[0].media_base64)) {
+          mensajeData.mediaType = 'audio'
+          mensajeData.mediaUrl = campania[0].media_url
+          mensajeData.mediaBase64 = campania[0].media_base64
+          mensajeData.mediaMimetype = campania[0].media_mimetype
+        }
+
+        await encolarMensajeWhatsApp(mensajeData, acumulatedDelay)
+
+        console.log(`[Campaña ${campaniaId}] Contacto ${i + 1}/${contactos.length} programado con delay ${Math.round(acumulatedDelay / 1000)}s`)
 
         // Marcar como enviando
         await execute(

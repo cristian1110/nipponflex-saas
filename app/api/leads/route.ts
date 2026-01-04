@@ -46,7 +46,8 @@ export async function GET(request: NextRequest) {
       }
 
       if (pipeline_id) {
-        sql += ` AND l.pipeline_id = $${paramIdx}`
+        // Filtrar por pipeline_id del lead O por el pipeline de la etapa
+        sql += ` AND (l.pipeline_id = $${paramIdx} OR e.pipeline_id = $${paramIdx})`
         params.push(parseInt(pipeline_id))
         paramIdx++
       }
