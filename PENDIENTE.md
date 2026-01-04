@@ -1,91 +1,129 @@
 # NipponFlex - Estado del Proyecto
-> Ultima actualizacion: 4 de enero 2026, 09:00 AM
+> Ultima actualizacion: 4 de enero 2026, 12:00 PM
 
 ---
 
-## COMPLETADO HOY (4 enero 2026 - Sesion 2)
+## COMPLETADO HOY (4 enero 2026 - Sesion 3)
+
+### Multi-idioma y Zona Horaria
+- [x] Campo `zona_horaria` en tabla clientes (default: America/Guayaquil)
+- [x] Campo `idioma` en tabla clientes (es, en, pt)
+- [x] Worker de recordatorios usa zona horaria del cliente
+- [x] Traducciones en `/locales/es.json`, `en.json`, `pt.json`
+- [x] Hook `useTranslation` con formateo de fechas/horas
+- [x] Contexto `I18nProvider` en layout principal
+- [x] Sidebar traducido
+- [x] Nueva pestana "Regional" en Configuracion:
+  - Selector de idioma (ES, EN, PT)
+  - Selector de zona horaria (12 zonas comunes)
+  - Preview de hora actual
+
+### Conversaciones - Crear Contacto
+- [x] Boton "Crear contacto" en header del chat
+- [x] Solo aparece si la conversacion NO tiene lead_id asociado
+- [x] Modal para ingresar nombre y email
+- [x] Crea lead automaticamente en el CRM
+- [x] Actualiza nombre en la conversacion
+
+### Dashboard - Correcciones
+- [x] Fix conteo de contactos (solo leads, no conversaciones)
+- [x] Estado del Sistema muestra datos REALES:
+  - WhatsApp: Conectado/Desconectado/No configurado
+  - Agente IA: Activo/Sin agente (verifica BD)
+  - Base de datos: Online/Offline
+- [x] Nueva API `/api/sistema/estado`
+
+### Limite de Contactos en Importacion
+- [x] Verificacion de limite antes de importar
+- [x] Cuenta contactos actuales vs limite del plan
+- [x] Solo importa los que caben en el espacio disponible
+- [x] Mensaje cuando hay contactos omitidos por limite
+- [x] Muestra "X/Y contactos" en resultado
+- [x] Aplicado a `/api/contactos/importar` y `/api/crm/importar`
+
+---
+
+## COMPLETADO (4 enero 2026 - Sesion 2)
 
 ### Aislamiento de Datos por Cliente
-- [x] API WhatsApp ahora usa instancias por cliente (no instancia fija)
-- [x] Cada cliente obtiene su propia instancia de Evolution API automaticamente
-- [x] Se crea instancia automatica si el cliente no tiene una
-- [x] Usuario soporte@tecnisupportpc.com ahora tiene cliente_id asignado
+- [x] API WhatsApp ahora usa instancias por cliente
+- [x] Cada cliente obtiene su propia instancia de Evolution API
+- [x] Se crea instancia automatica si no existe
 
 ### Panel de Super Admin
 - [x] Nueva pagina `/admin/sistema` para administracion global
 - [x] Gestion de clientes/empresas (crear, activar/desactivar)
-- [x] Configuracion de integraciones globales:
-  - GROQ_API_KEY (IA)
-  - JINA_API_KEY (Embeddings)
-  - ELEVENLABS_API_KEY (Voz)
-  - EVOLUTION_API_URL/KEY (WhatsApp)
-  - QDRANT_URL (Base vectorial)
-  - SMTP (Email)
-- [x] Nueva tabla `configuracion_global` para API keys
+- [x] Configuracion de integraciones globales
+- [x] Nueva tabla `configuracion_global`
 
 ### Usuarios y Roles
 - [x] Super admin puede seleccionar cliente al crear usuario
 - [x] Super admin puede crear otros super admins
-- [x] API de roles permite crear todos los niveles (para super admin)
-- [x] Menu lateral incluye link "Admin Sistema" (solo nivel 100)
+- [x] Menu lateral incluye "Admin Sistema" (nivel 100)
 
-### Metricas APIs
-- [x] Verificado que funciona correctamente
-- [x] Solo visible para super admin (nivel >= 100)
+### Multimedia en Conversaciones
+- [x] Selector de emojis
+- [x] Boton para adjuntar archivos (imagen, audio, video, docs)
+- [x] Preview de archivos antes de enviar
+- [x] Envio de multimedia via Evolution API
+
+### ElevenLabs TTS
+- [x] Respuestas con audio en WhatsApp
+- [x] Clonacion de voces personalizadas
+- [x] UI para clonar voz (subir audio)
+- [x] Toggle "Responder con audio"
+- [x] Si cliente envia audio -> responde con audio
+
+### Usuarios - Mejoras
+- [x] Crear usuarios con contrasena generada
+- [x] Enviar credenciales por email, WhatsApp o copiar
+- [x] Forzar cambio de contrasena en primer inicio
+- [x] Pagina `/cambiar-password`
 
 ---
 
-## COMPLETADO ANTERIORMENTE (4 enero 2026 - Sesion 1)
+## COMPLETADO (4 enero 2026 - Sesion 1)
 
 ### Campanas Masivas - Anti-Ban
-- [x] Delays aleatorios entre mensajes (configurable min/max)
-- [x] Variacion adicional ±20% para mas naturalidad
-- [x] Orden aleatorio de contactos (ORDER BY RANDOM)
-- [x] Soporte multimedia (imagen/audio) en campanas
-- [x] Fix filtro leads por pipeline (busca en l.pipeline_id O e.pipeline_id)
+- [x] Delays aleatorios entre mensajes
+- [x] Variacion adicional ±20%
+- [x] Orden aleatorio de contactos
+- [x] Soporte multimedia
 
-### CRM - Mejoras de Etapas y Leads
-- [x] Selector de etapa al crear nuevo lead
-- [x] Selector de etapa al agregar contacto existente al pipeline
-- [x] Boton editar en cada etapa del kanban
-- [x] Modal para editar nombre y color de etapas
+### CRM - Etapas y Leads
+- [x] Selector de etapa al crear lead
+- [x] Boton editar en etapas del kanban
+- [x] Modal para editar nombre y color
 
 ### Recordatorios de Citas
-- [x] Fix token del worker (nf_worker_secret_2025_secure)
-- [x] Cron funcionando correctamente cada 5 minutos
-
-### Google Calendar (Pausado)
-- [x] Integracion OAuth con Google Calendar API
-- [x] Tabla `integraciones_google` para tokens
-- [x] Columna `google_event_id` en citas
-- [x] Sincronizacion automatica de citas (crear/editar/eliminar)
-- [x] UI en Integraciones para conectar cuenta Google
-- [ ] **PAUSADO** - Requiere configurar credenciales OAuth en Google Cloud Console
+- [x] Fix token del worker
+- [x] Cron funcionando cada 5 minutos
+- [x] Usa zona horaria del cliente
 
 ---
 
 ## PENDIENTE
 
-### 1. Multi-idioma (ES/EN) - Prioridad Media
-- [ ] Crear sistema de traducciones (i18n)
-- [ ] Traducir interfaz a ingles
-- [ ] Selector de idioma en configuracion
-- [ ] Detectar idioma del navegador
-
-### 2. Integracion Twilio/Vonage (Llamadas) - Prioridad Alta
+### 1. Integracion Twilio/Vonage (Llamadas) - Prioridad Alta
 - [ ] Decidir: Twilio o Vonage
 - [ ] Crear cuenta y obtener credenciales
 - [ ] Agregar variables al .env
 - [ ] Crear `lib/twilio.ts` para llamadas
 - [ ] Webhook para recibir llamadas entrantes
-- [ ] Integrar con agente IA para responder
+- [ ] Integrar con agente IA
 
-### 3. Completar Google Calendar - Prioridad Baja
+### 2. Completar Google Calendar - Prioridad Baja
 - [ ] Configurar proyecto en Google Cloud Console
 - [ ] Habilitar Google Calendar API
 - [ ] Crear credenciales OAuth 2.0
-- [ ] Agregar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET al .env
+- [ ] Agregar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET
 - [ ] Probar flujo completo
+
+### 3. Mejoras Pendientes
+- [ ] Reportes exportables (PDF/Excel)
+- [ ] Dashboard con mas graficos
+- [ ] Notificaciones push
+- [ ] Modo offline/PWA
 
 ---
 
@@ -115,40 +153,43 @@ GOOGLE_CLIENT_SECRET=pendiente
 
 ---
 
-## ARCHIVOS MODIFICADOS/CREADOS HOY
+## ARCHIVOS MODIFICADOS/CREADOS HOY (Sesion 3)
 
 ```
-# Aislamiento de WhatsApp por cliente
-app/api/whatsapp/route.ts                    - Usa instancia por cliente_id
+# Multi-idioma y Zona Horaria
+locales/es.json                              - NUEVO - Traducciones espanol
+locales/en.json                              - NUEVO - Traducciones ingles
+locales/pt.json                              - NUEVO - Traducciones portugues
+lib/i18n.tsx                                 - NUEVO - Hook useTranslation
+app/api/cliente/configuracion/route.ts       - NUEVO - API config regional
+app/api/worker/recordatorios/route.ts        - Usa zona horaria del cliente
+app/configuracion/page.tsx                   - Nueva pestana Regional
+components/Sidebar.tsx                       - Traducciones
 
-# Panel Super Admin
-app/admin/sistema/page.tsx                   - NUEVO - Gestion global
-app/api/admin/clientes/route.ts              - NUEVO - API clientes
-app/api/admin/configuracion/route.ts         - NUEVO - API config global
+# Conversaciones
+app/conversaciones/page.tsx                  - Boton Crear contacto + Modal
 
-# Usuarios
-app/usuarios/page.tsx                        - Selector de cliente para super admin
-app/api/usuarios/route.ts                    - Permite crear super admins
+# Dashboard
+app/dashboard/page.tsx                       - Estado del sistema real
+app/api/sistema/estado/route.ts              - NUEVO - API estado sistema
+app/api/metricas/dashboard/route.ts          - Fix conteo contactos
 
-# UI
-components/Sidebar.tsx                       - Link Admin Sistema
-
-# Base de datos
-- Tabla configuracion_global (nueva)
-- Cliente id=3 creado para soporte@tecnisupportpc.com
+# Limite de importacion
+app/api/contactos/importar/route.ts          - Verificacion de limite
+app/api/crm/importar/route.ts                - Verificacion de limite
+app/crm/page.tsx                             - UI mensaje limite
 ```
 
 ---
 
 ## NOTAS IMPORTANTES
 
-1. **Cada cliente tiene su propia instancia de WhatsApp** - Ya no se comparte una sola instancia
-2. **El super admin ve "Admin Sistema"** en el menu lateral para:
-   - Gestionar clientes/empresas
-   - Configurar API keys globales (Groq, Jina, ElevenLabs, etc.)
-3. **Los usuarios normales NO ven** las integraciones globales ni pueden crear super admins
-4. **Las citas y datos estan aislados** por cliente_id
+1. **Cada cliente tiene su zona horaria** - Los recordatorios llegan a la hora correcta
+2. **Multi-idioma activo** - ES, EN, PT disponibles en Configuracion > Regional
+3. **Limite de contactos se respeta** - No puedes importar mas de lo que permite el plan
+4. **Estado del sistema en tiempo real** - Dashboard muestra si WhatsApp y Agente estan activos
+5. **Crear contacto desde chat** - Si alguien escribe y no es contacto, puedes agregarlo
 
 ---
 
-*Continuar con las tareas pendientes*
+*Continuar con integracion de llamadas (Twilio/Vonage)*
