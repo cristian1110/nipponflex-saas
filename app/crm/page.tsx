@@ -91,8 +91,12 @@ export default function CRMPage() {
   // Forms
   const [newPipeline, setNewPipeline] = useState({ nombre: '', descripcion: '', color: '#3498db', icono: '📊' })
   const [newEtapa, setNewEtapa] = useState({ nombre: '', color: '#3498db' })
-  const [newLead, setNewLead] = useState({ nombre: '', telefono: '', email: '', empresa: '', valor_estimado: 0 })
+  const [newLead, setNewLead] = useState({ nombre: '', telefono: '', email: '', empresa: '', valor_estimado: 0, etapa_id: 0 })
   const [leadMode, setLeadMode] = useState<'nuevo' | 'existente'>('nuevo')
+
+  // Editar etapa
+  const [showEditEtapa, setShowEditEtapa] = useState(false)
+  const [editEtapa, setEditEtapa] = useState<Etapa | null>(null)
   
   // Para agregar contacto a pipeline
   const [contactoToAdd, setContactoToAdd] = useState<Contacto | null>(null)
@@ -247,21 +251,35 @@ export default function CRMPage() {
     loadPipelineData()
   }
 
+  const actualizarEtapa = async () => {
+    if (!editEtapa) return
+    await fetch('/api/crm/etapas', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editEtapa.id, nombre: editEtapa.nombre, color: editEtapa.color })
+    })
+    setShowEditEtapa(false)
+    setEditEtapa(null)
+    loadPipelineData()
+  }
+
   // Lead handlers
   const crearLead = async () => {
     if (!selectedPipeline) return
+    const etapaId = newLead.etapa_id || etapas[0]?.id
     await fetch('/api/crm/leads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...newLead, pipeline_id: selectedPipeline.id, etapa_id: etapas[0]?.id })
+      body: JSON.stringify({ ...newLead, pipeline_id: selectedPipeline.id, etapa_id: etapaId })
     })
     setShowNewLead(false)
-    setNewLead({ nombre: '', telefono: '', email: '', empresa: '', valor_estimado: 0 })
+    setNewLead({ nombre: '', telefono: '', email: '', empresa: '', valor_estimado: 0, etapa_id: 0 })
     loadPipelineData()
   }
 
   const crearLeadDesdeContacto = async (contacto: Contacto) => {
     if (!selectedPipeline || etapas.length === 0) return
+    const etapaId = newLead.etapa_id || etapas[0]?.id
     await fetch('/api/crm/leads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -271,12 +289,13 @@ export default function CRMPage() {
         email: contacto.email,
         empresa: contacto.empresa,
         pipeline_id: selectedPipeline.id,
-        etapa_id: etapas[0]?.id
+        etapa_id: etapaId
       })
     })
     setShowSelectContacto(false)
     setShowNewLead(false)
     setSearchContactoModal('')
+    setNewLead({ nombre: '', telefono: '', email: '', empresa: '', valor_estimado: 0, etapa_id: 0 })
     loadPipelineData()
   }
 
@@ -521,6 +540,7 @@ export default function CRMPage() {
                         {etapa.es_ganado && <span className="text-xs">✅</span>}
                         {etapa.es_perdido && <span className="text-xs">❌</span>}
                         <span className="text-xs bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">{etapa.total_leads}</span>
+                        <button onClick={() => { setEditEtapa(etapa); setShowEditEtapa(true) }} className="text-xs text-blue-400 opacity-50 hover:opacity-100">✏️</button>
                         <button onClick={() => eliminarEtapa(etapa.id)} className="text-xs text-red-400 opacity-50 hover:opacity-100">×</button>
                       </div>
                       {etapa.valor_total > 0 && <p className="text-xs text-emerald-400 mt-1">${etapa.valor_total.toLocaleString()}</p>}
@@ -779,6 +799,18 @@ export default function CRMPage() {
                 <input type="tel" placeholder="Teléfono *" value={newLead.telefono} onChange={(e) => setNewLead({ ...newLead, telefono: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
                 <input type="email" placeholder="Email" value={newLead.email} onChange={(e) => setNewLead({ ...newLead, email: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
                 <input type="text" placeholder="Empresa" value={newLead.empresa} onChange={(e) => setNewLead({ ...newLead, empresa: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)]">Etapa</label>
+                  <select
+                    value={newLead.etapa_id || etapas[0]?.id || 0}
+                    onChange={(e) => setNewLead({ ...newLead, etapa_id: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                  >
+                    {etapas.map(e => (
+                      <option key={e.id} value={e.id}>{e.nombre}</option>
+                    ))}
+                  </select>
+                </div>
                 <input type="number" placeholder="Valor $" value={newLead.valor_estimado || ''} onChange={(e) => setNewLead({ ...newLead, valor_estimado: Number(e.target.value) })} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
                 <div className="flex gap-2 mt-4">
                   <button onClick={() => setShowNewLead(false)} className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
@@ -787,6 +819,18 @@ export default function CRMPage() {
               </div>
             ) : (
               <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)]">Agregar a la etapa</label>
+                  <select
+                    value={newLead.etapa_id || etapas[0]?.id || 0}
+                    onChange={(e) => setNewLead({ ...newLead, etapa_id: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                  >
+                    {etapas.map(e => (
+                      <option key={e.id} value={e.id}>{e.nombre}</option>
+                    ))}
+                  </select>
+                </div>
                 <input type="text" placeholder="Buscar contacto..." value={searchContactoModal} onChange={(e) => setSearchContactoModal(e.target.value)} className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" />
                 <div className="max-h-64 overflow-y-auto space-y-1">
                   {filteredContactos.length === 0 ? (
@@ -968,6 +1012,39 @@ export default function CRMPage() {
             <div className="flex gap-2 mt-4">
               <button onClick={() => { setShowEditContacto(false); setEditContacto(null) }} className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
               <button onClick={actualizarContacto} disabled={!editContacto.telefono} className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm disabled:opacity-50">Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Editar Etapa */}
+      {showEditEtapa && editEtapa && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--bg-secondary)] rounded-xl p-5 w-full max-w-sm">
+            <h3 className="font-bold text-[var(--text-primary)] mb-4">Editar Etapa</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-[var(--text-secondary)]">Nombre</label>
+                <input
+                  type="text"
+                  value={editEtapa.nombre}
+                  onChange={(e) => setEditEtapa({ ...editEtapa, nombre: e.target.value })}
+                  className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-secondary)]">Color</label>
+                <input
+                  type="color"
+                  value={editEtapa.color}
+                  onChange={(e) => setEditEtapa({ ...editEtapa, color: e.target.value })}
+                  className="w-full h-10 rounded cursor-pointer"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => { setShowEditEtapa(false); setEditEtapa(null) }} className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
+              <button onClick={actualizarEtapa} disabled={!editEtapa.nombre} className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm disabled:opacity-50">Guardar</button>
             </div>
           </div>
         </div>
