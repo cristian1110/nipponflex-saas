@@ -152,9 +152,15 @@ export async function GET(request: NextRequest) {
       })
       const data = await res.json()
 
+      // Evolution API devuelve el QR en diferentes formatos según la versión
+      const qrCode = data.base64 || data.qrcode?.base64 || data.qr || data.qrcode || null
+
+      console.log('QR Response:', { hasQR: !!qrCode, keys: Object.keys(data) })
+
       return NextResponse.json({
         connected: false,
-        qr: data.base64 || data.qrcode?.base64 || null,
+        qrcode: qrCode,
+        base64: qrCode,
         code: data.code || data.pairingCode || null,
         instance: instance
       })
