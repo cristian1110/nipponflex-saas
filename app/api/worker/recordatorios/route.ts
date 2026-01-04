@@ -20,8 +20,9 @@ export async function POST(request: NextRequest) {
     // - Estado pendiente o confirmada
     // - Recordatorio no enviado
     // - Recordatorio configurado (recordatorio_minutos > 0)
-    // - Fecha/hora está dentro del tiempo de recordatorio
+    // - Fecha/hora está dentro del tiempo de recordatorio (usando zona horaria del cliente)
     // - Tienen teléfono asociado (del lead o directo)
+    // IMPORTANTE: La comparación se hace en la zona horaria del cliente
     const citasPendientes = await query(`
       SELECT
         c.id, c.titulo, c.fecha_inicio, c.recordatorio_canal,
@@ -29,6 +30,8 @@ export async function POST(request: NextRequest) {
         c.recordatorio_mensaje,
         l.telefono as lead_telefono, l.nombre as lead_nombre,
         cl.id as cliente_id,
+        cl.zona_horaria,
+        cl.idioma,
         iw.evolution_instance, iw.evolution_api_key
       FROM citas c
       LEFT JOIN leads l ON c.lead_id = l.id
@@ -38,8 +41,8 @@ export async function POST(request: NextRequest) {
         AND c.recordatorio_enviado = false
         AND COALESCE(c.recordatorio_activo, true) = true
         AND COALESCE(c.recordatorio_minutos, 120) > 0
-        AND c.fecha_inicio > NOW()
-        AND c.fecha_inicio <= NOW() + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
+        AND c.fecha_inicio > (NOW() AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil'))
+        AND c.fecha_inicio <= (NOW() AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil')) + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
         AND (c.telefono_recordatorio IS NOT NULL OR l.telefono IS NOT NULL)
       ORDER BY c.fecha_inicio
       LIMIT 20
@@ -62,16 +65,30 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Formatear fecha y hora
+      // Formatear fecha y hora en la zona horaria e idioma del cliente
       const fechaCita = new Date(cita.fecha_inicio)
-      const fechaFormateada = fechaCita.toLocaleDateString('es-ES', {
+      const zonaHoraria = cita.zona_horaria || 'America/Guayaquil'
+      const idioma = cita.idioma || 'es'
+
+      // Mapeo de códigos de idioma a locales completos
+      const localeMap: Record<string, string> = {
+        'es': 'es-ES',
+        'en': 'en-US',
+        'pt': 'pt-BR'
+      }
+      const locale = localeMap[idioma] || 'es-ES'
+
+      const fechaFormateada = fechaCita.toLocaleDateString(locale, {
         weekday: 'long',
         day: 'numeric',
-        month: 'long'
+        month: 'long',
+        timeZone: zonaHoraria
       })
-      const horaFormateada = fechaCita.toLocaleTimeString('es-ES', {
+      const horaFormateada = fechaCita.toLocaleTimeString(locale, {
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        hour12: true,
+        timeZone: zonaHoraria
       })
 
       // Construir mensaje de recordatorio
@@ -168,20 +185,23 @@ Por favor, confirma tu asistencia respondiendo a este mensaje.
 
 // GET para verificar estado del worker
 export async function GET() {
+  // Contar citas pendientes de recordatorio considerando zona horaria de cada cliente
   const pendientes = await queryOne(`
     SELECT COUNT(*) as total
-    FROM citas
-    WHERE estado IN ('pendiente', 'confirmada')
-      AND recordatorio_enviado = false
-      AND COALESCE(recordatorio_activo, true) = true
-      AND COALESCE(recordatorio_minutos, 120) > 0
-      AND fecha_inicio > NOW()
-      AND fecha_inicio <= NOW() + (COALESCE(recordatorio_minutos, 120) || ' minutes')::interval
+    FROM citas c
+    JOIN clientes cl ON c.cliente_id = cl.id
+    WHERE c.estado IN ('pendiente', 'confirmada')
+      AND c.recordatorio_enviado = false
+      AND COALESCE(c.recordatorio_activo, true) = true
+      AND COALESCE(c.recordatorio_minutos, 120) > 0
+      AND c.fecha_inicio > (NOW() AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil'))
+      AND c.fecha_inicio <= (NOW() AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil')) + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
   `)
 
   return NextResponse.json({
     status: 'Worker recordatorios activo',
     citas_pendientes_recordatorio: parseInt(pendientes?.total || '0'),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    server_time_utc: new Date().toISOString()
   })
 }

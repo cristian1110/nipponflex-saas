@@ -5,16 +5,22 @@ export const dynamic = 'force-dynamic'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
+import { useTranslation, TIMEZONES, LANGUAGES, Locale } from '@/lib/i18n'
 
 export default function ConfiguracionPage() {
   const router = useRouter()
+  const { locale, setLocale, timezone, setTimezone, t } = useTranslation()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('perfil')
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
-  
+
   // Perfil
   const [perfil, setPerfil] = useState({ nombre: '', email: '', telefono: '' })
+
+  // Regional
+  const [regional, setRegional] = useState({ zona_horaria: 'America/Guayaquil', idioma: 'es' })
+  const [savingRegional, setSavingRegional] = useState(false)
   const [savingPerfil, setSavingPerfil] = useState(false)
   
   // Password
@@ -53,8 +59,46 @@ export default function ConfiguracionPage() {
       setPerfil({ nombre: data.nombre || '', email: data.email || '', telefono: data.telefono || '' })
       setTestEmailTo(data.email || '')
       loadEmailConfig()
+      loadRegionalConfig()
     } catch { router.push('/login') }
     setLoading(false)
+  }
+
+  const loadRegionalConfig = async () => {
+    try {
+      const res = await fetch('/api/cliente/configuracion')
+      if (res.ok) {
+        const data = await res.json()
+        setRegional({
+          zona_horaria: data.zona_horaria || 'America/Guayaquil',
+          idioma: data.idioma || 'es'
+        })
+        // Sincronizar con el contexto i18n
+        setTimezone(data.zona_horaria || 'America/Guayaquil')
+        setLocale((data.idioma || 'es') as Locale)
+      }
+    } catch (e) { console.error(e) }
+  }
+
+  const saveRegional = async () => {
+    setSavingRegional(true)
+    setMessage(null)
+    try {
+      const res = await fetch('/api/cliente/configuracion', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(regional)
+      })
+      if (res.ok) {
+        setMessage({ type: 'success', text: t('success.saved') })
+        // Actualizar contexto i18n
+        setTimezone(regional.zona_horaria)
+        setLocale(regional.idioma as Locale)
+      } else {
+        setMessage({ type: 'error', text: t('errors.generic') })
+      }
+    } catch { setMessage({ type: 'error', text: t('errors.networkError') }) }
+    setSavingRegional(false)
   }
 
   const loadEmailConfig = async () => {
@@ -206,10 +250,11 @@ export default function ConfiguracionPage() {
   }
 
   const tabs = [
-    { id: 'perfil', nombre: 'Mi Perfil', icon: '👤' },
-    { id: 'seguridad', nombre: 'Seguridad', icon: '🔒' },
-    { id: 'email', nombre: 'Email Saliente', icon: '📧' },
-    { id: 'notificaciones', nombre: 'Notificaciones', icon: '🔔' },
+    { id: 'perfil', nombre: t('sidebar.settings') === 'Settings' ? 'My Profile' : 'Mi Perfil', icon: '👤' },
+    { id: 'regional', nombre: locale === 'en' ? 'Regional' : locale === 'pt' ? 'Regional' : 'Regional', icon: '🌍' },
+    { id: 'seguridad', nombre: locale === 'en' ? 'Security' : locale === 'pt' ? 'Segurança' : 'Seguridad', icon: '🔒' },
+    { id: 'email', nombre: locale === 'en' ? 'Outgoing Email' : locale === 'pt' ? 'Email Saída' : 'Email Saliente', icon: '📧' },
+    { id: 'notificaciones', nombre: locale === 'en' ? 'Notifications' : locale === 'pt' ? 'Notificações' : 'Notificaciones', icon: '🔔' },
   ]
 
   if (loading) {
@@ -272,6 +317,104 @@ export default function ConfiguracionPage() {
                     </div>
                     <button onClick={savePerfil} disabled={savingPerfil} className="px-6 py-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50 hover:bg-emerald-700">
                       {savingPerfil ? 'Guardando...' : '💾 Guardar cambios'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'regional' && (
+                <div className="space-y-6">
+                  <h2 className="text-lg font-bold text-[var(--text-primary)]">
+                    🌍 {locale === 'en' ? 'Regional Settings' : locale === 'pt' ? 'Configurações Regionais' : 'Configuración Regional'}
+                  </h2>
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    {locale === 'en'
+                      ? 'Configure your timezone and language preferences'
+                      : locale === 'pt'
+                        ? 'Configure seu fuso horário e preferências de idioma'
+                        : 'Configura tu zona horaria y preferencias de idioma'}
+                  </p>
+
+                  <div className="bg-[var(--bg-secondary)] rounded-xl p-5 border border-[var(--border-color)] space-y-5">
+                    {/* Idioma */}
+                    <div>
+                      <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
+                        🗣️ {t('settings.language')}
+                      </label>
+                      <div className="grid grid-cols-3 gap-3">
+                        {LANGUAGES.map(lang => (
+                          <button
+                            key={lang.value}
+                            onClick={() => setRegional({ ...regional, idioma: lang.value })}
+                            className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                              regional.idioma === lang.value
+                                ? 'border-emerald-500 bg-emerald-500/10'
+                                : 'border-[var(--border-color)] hover:border-emerald-500/50'
+                            }`}
+                          >
+                            <span className="text-3xl">{lang.flag}</span>
+                            <span className="font-medium text-[var(--text-primary)]">{lang.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Zona horaria */}
+                    <div>
+                      <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
+                        🕐 {t('settings.timezone')}
+                      </label>
+                      <select
+                        value={regional.zona_horaria}
+                        onChange={(e) => setRegional({ ...regional, zona_horaria: e.target.value })}
+                        className="w-full px-4 py-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:ring-2 focus:ring-emerald-500"
+                      >
+                        {TIMEZONES.map(tz => (
+                          <option key={tz.value} value={tz.value}>{tz.label}</option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-2">
+                        {locale === 'en'
+                          ? 'This timezone will be used for appointments and reminders'
+                          : locale === 'pt'
+                            ? 'Este fuso horário será usado para agendamentos e lembretes'
+                            : 'Esta zona horaria se usará para citas y recordatorios'}
+                      </p>
+                    </div>
+
+                    {/* Hora actual */}
+                    <div className="bg-[var(--bg-tertiary)] rounded-lg p-4">
+                      <div className="text-sm text-[var(--text-secondary)]">
+                        {locale === 'en' ? 'Current time in selected timezone:' : locale === 'pt' ? 'Hora atual no fuso selecionado:' : 'Hora actual en la zona seleccionada:'}
+                      </div>
+                      <div className="text-2xl font-bold text-emerald-500 mt-1">
+                        {new Date().toLocaleTimeString(locale === 'en' ? 'en-US' : locale === 'pt' ? 'pt-BR' : 'es-ES', {
+                          timeZone: regional.zona_horaria,
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                          hour12: true
+                        })}
+                      </div>
+                      <div className="text-sm text-[var(--text-tertiary)] mt-1">
+                        {new Date().toLocaleDateString(locale === 'en' ? 'en-US' : locale === 'pt' ? 'pt-BR' : 'es-ES', {
+                          timeZone: regional.zona_horaria,
+                          weekday: 'long',
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric'
+                        })}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={saveRegional}
+                      disabled={savingRegional}
+                      className="w-full px-6 py-3 bg-emerald-600 text-white rounded-lg disabled:opacity-50 hover:bg-emerald-700 font-medium"
+                    >
+                      {savingRegional
+                        ? (locale === 'en' ? 'Saving...' : locale === 'pt' ? 'Salvando...' : 'Guardando...')
+                        : `💾 ${t('common.save')}`}
                     </button>
                   </div>
                 </div>

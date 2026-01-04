@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import ThemeToggle from './ThemeToggle'
+import { useTranslation } from '@/lib/i18n'
 
 interface SidebarProps {
   user: {
@@ -14,27 +15,49 @@ interface SidebarProps {
   }
 }
 
+// Labels traducidos por key
+const menuLabels: Record<string, { es: string; en: string; pt: string }> = {
+  '/dashboard': { es: 'Dashboard', en: 'Dashboard', pt: 'Painel' },
+  '/crm': { es: 'CRM', en: 'CRM', pt: 'CRM' },
+  '/conversaciones': { es: 'Conversaciones', en: 'Conversations', pt: 'Conversas' },
+  '/calendario': { es: 'Calendario', en: 'Calendar', pt: 'Calendário' },
+  '/agentes': { es: 'Agentes IA', en: 'AI Agents', pt: 'Agentes IA' },
+  '/reportes': { es: 'Reportes', en: 'Reports', pt: 'Relatórios' },
+  '/usuarios': { es: 'Usuarios', en: 'Users', pt: 'Usuários' },
+  '/integraciones': { es: 'Integraciones', en: 'Integrations', pt: 'Integrações' },
+  '/configuracion': { es: 'Configuración', en: 'Settings', pt: 'Configurações' },
+  '/admin/sistema': { es: 'Admin Sistema', en: 'System Admin', pt: 'Admin Sistema' },
+  '/admin/metricas': { es: 'Métricas APIs', en: 'API Metrics', pt: 'Métricas APIs' },
+}
+
 const menuItems = [
-  { href: '/dashboard', icon: '🏠', label: 'Dashboard', minLevel: 1 },
-  { href: '/crm', icon: '👥', label: 'CRM', minLevel: 2 },
-  { href: '/conversaciones', icon: '💬', label: 'Conversaciones', minLevel: 2 },
-  { href: '/calendario', icon: '📅', label: 'Calendario', minLevel: 2 },
-  { href: '/agentes', icon: '🤖', label: 'Agentes IA', minLevel: 3 },
-  { href: '/reportes', icon: '📊', label: 'Reportes', minLevel: 3 },
-  { href: '/usuarios', icon: '👤', label: 'Usuarios', minLevel: 4 },
-  { href: '/integraciones', icon: '🔗', label: 'Integraciones', minLevel: 4 },
-  { href: '/configuracion', icon: '⚙️', label: 'Configuración', minLevel: 3 },
+  { href: '/dashboard', icon: '🏠', minLevel: 1 },
+  { href: '/crm', icon: '👥', minLevel: 2 },
+  { href: '/conversaciones', icon: '💬', minLevel: 2 },
+  { href: '/calendario', icon: '📅', minLevel: 2 },
+  { href: '/agentes', icon: '🤖', minLevel: 3 },
+  { href: '/reportes', icon: '📊', minLevel: 3 },
+  { href: '/usuarios', icon: '👤', minLevel: 4 },
+  { href: '/integraciones', icon: '🔗', minLevel: 4 },
+  { href: '/configuracion', icon: '⚙️', minLevel: 3 },
   // Solo Super Admin (nivel 100)
-  { href: '/admin/sistema', icon: '🔧', label: 'Admin Sistema', minLevel: 100 },
-  { href: '/admin/metricas', icon: '📈', label: 'Métricas APIs', minLevel: 100 },
+  { href: '/admin/sistema', icon: '🔧', minLevel: 100 },
+  { href: '/admin/metricas', icon: '📈', minLevel: 100 },
 ]
 
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const { locale, t } = useTranslation()
   const [collapsed, setCollapsed] = useState(false)
 
   const visibleItems = menuItems.filter(item => user.nivel >= item.minLevel)
+
+  // Función para obtener label traducido
+  const getLabel = (href: string) => {
+    const labels = menuLabels[href]
+    return labels ? labels[locale] || labels.es : href
+  }
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -68,6 +91,7 @@ export default function Sidebar({ user }: SidebarProps) {
       <nav className="flex-1 overflow-y-auto py-2">
         {visibleItems.map((item) => {
           const isActive = pathname === item.href
+          const label = getLabel(item.href)
           return (
             <button
               key={item.href}
@@ -77,10 +101,10 @@ export default function Sidebar({ user }: SidebarProps) {
                   ? 'bg-emerald-600 text-white'
                   : 'text-[var(--sidebar-text)] hover:bg-[var(--bg-hover)]'
               } ${collapsed ? 'justify-center' : ''}`}
-              title={collapsed ? item.label : undefined}
+              title={collapsed ? label : undefined}
             >
               <span className="text-lg">{item.icon}</span>
-              {!collapsed && <span className="text-sm">{item.label}</span>}
+              {!collapsed && <span className="text-sm">{label}</span>}
             </button>
           )
         })}
@@ -107,7 +131,7 @@ export default function Sidebar({ user }: SidebarProps) {
               onClick={handleLogout}
               className="flex-1 px-3 py-1.5 text-sm bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors"
             >
-              Salir
+              {t('common.logout')}
             </button>
           )}
         </div>
