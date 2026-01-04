@@ -33,6 +33,11 @@ export default function IntegracionesPage() {
   const [savingOdoo, setSavingOdoo] = useState(false)
   const [odooTab, setOdooTab] = useState<'config' | 'sync' | 'data'>('config')
 
+  // Google Calendar
+  const [gcalStatus, setGcalStatus] = useState<{ connected: boolean; email?: string; configured: boolean }>({ connected: false, configured: false })
+  const [gcalLoading, setGcalLoading] = useState(false)
+  const [syncingCitas, setSyncingCitas] = useState(false)
+
   useEffect(() => { checkAuth() }, [])
 
   useEffect(() => {
@@ -48,6 +53,7 @@ export default function IntegracionesPage() {
       setUser(await res.json())
       loadWhatsAppStatus()
       loadOdooConfig()
+      loadGoogleCalendarStatus()
     } catch { router.push('/login') }
     setLoading(false)
   }
@@ -201,6 +207,62 @@ export default function IntegracionesPage() {
     setSavingOdoo(false)
   }
 
+  // ============ GOOGLE CALENDAR ============
+  const loadGoogleCalendarStatus = async () => {
+    try {
+      const res = await fetch('/api/integraciones/google-calendar')
+      if (res.ok) {
+        setGcalStatus(await res.json())
+      }
+    } catch (e) { console.error(e) }
+  }
+
+  const connectGoogleCalendar = async () => {
+    setGcalLoading(true)
+    try {
+      const res = await fetch('/api/integraciones/google-calendar?action=auth-url')
+      const data = await res.json()
+      if (data.authUrl) {
+        window.location.href = data.authUrl
+      } else {
+        alert(data.error || 'Error obteniendo URL de autorización')
+      }
+    } catch (e) {
+      alert('Error de conexión')
+    }
+    setGcalLoading(false)
+  }
+
+  const disconnectGoogleCalendar = async () => {
+    if (!confirm('¿Desconectar Google Calendar?')) return
+    try {
+      await fetch('/api/integraciones/google-calendar', { method: 'DELETE' })
+      setGcalStatus({ connected: false, configured: gcalStatus.configured })
+    } catch (e) {
+      alert('Error al desconectar')
+    }
+  }
+
+  const syncCitasToGoogle = async () => {
+    setSyncingCitas(true)
+    try {
+      const res = await fetch('/api/integraciones/google-calendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync' })
+      })
+      const data = await res.json()
+      if (data.success) {
+        alert(`Sincronización completada: ${data.synced} citas sincronizadas, ${data.errors} errores`)
+      } else {
+        alert('Error: ' + data.error)
+      }
+    } catch (e) {
+      alert('Error de sincronización')
+    }
+    setSyncingCitas(false)
+  }
+
   // Lista de integraciones
   const integraciones = [
     { id: 'whatsapp', icono: '💬', nombre: 'WhatsApp', desc: 'Evolution API con QR', estado: waStatus.connected, categoria: 'mensajeria' },
@@ -209,7 +271,7 @@ export default function IntegracionesPage() {
     { id: 'instagram', icono: '📸', nombre: 'Instagram', desc: 'DM API', estado: false, prox: true, categoria: 'mensajeria' },
     { id: 'messenger', icono: '💙', nombre: 'Messenger', desc: 'Facebook Chat', estado: false, prox: true, categoria: 'mensajeria' },
     { id: 'email', icono: '📧', nombre: 'Email', desc: 'Gmail/SMTP', estado: false, prox: true, categoria: 'comunicacion' },
-    { id: 'calendar', icono: '📅', nombre: 'Google Calendar', desc: 'Sincronizar citas', estado: false, prox: true, categoria: 'productividad' },
+    { id: 'calendar', icono: '📅', nombre: 'Google Calendar', desc: 'Sincronizar citas', estado: gcalStatus.connected, categoria: 'productividad' },
     { id: 'meta', icono: '☁️', nombre: 'Meta Cloud API', desc: 'WhatsApp Business', estado: false, prox: true, categoria: 'mensajeria' },
     { id: 'twilio', icono: '📱', nombre: 'Twilio', desc: 'SMS y WhatsApp', estado: false, prox: true, categoria: 'mensajeria' },
     { id: 'tiktok', icono: '🎵', nombre: 'TikTok', desc: 'Mensajes', estado: false, prox: true, categoria: 'mensajeria' },
@@ -526,6 +588,102 @@ export default function IntegracionesPage() {
                     <h3 className="font-medium text-[var(--text-primary)] mb-4">📊 Explorar Datos de Odoo</h3>
                     <p className="text-sm text-[var(--text-secondary)]">Conecta Odoo primero para ver los datos disponibles.</p>
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* Google Calendar */}
+            {activeTab === 'calendar' && (
+              <div className="max-w-2xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <span className="text-4xl">📅</span>
+                  <div>
+                    <h2 className="text-xl font-bold text-[var(--text-primary)]">Google Calendar</h2>
+                    <p className="text-sm text-[var(--text-secondary)]">Sincroniza citas con tu calendario</p>
+                  </div>
+                </div>
+
+                {/* Estado de conexión */}
+                <div className="bg-[var(--bg-secondary)] rounded-xl p-5 border border-[var(--border-color)] mb-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${gcalStatus.connected ? 'bg-emerald-400' : 'bg-gray-400'}`}></div>
+                      <div>
+                        <span className="font-medium text-[var(--text-primary)]">
+                          {gcalStatus.connected ? 'Conectado' : 'No conectado'}
+                        </span>
+                        {gcalStatus.email && (
+                          <p className="text-sm text-[var(--text-secondary)]">{gcalStatus.email}</p>
+                        )}
+                      </div>
+                    </div>
+                    {gcalStatus.connected ? (
+                      <button
+                        onClick={disconnectGoogleCalendar}
+                        className="px-3 py-1.5 bg-red-500/20 text-red-400 rounded-lg text-sm hover:bg-red-500/30"
+                      >
+                        Desconectar
+                      </button>
+                    ) : (
+                      <button
+                        onClick={connectGoogleCalendar}
+                        disabled={gcalLoading || !gcalStatus.configured}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {gcalLoading ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Conectando...
+                          </>
+                        ) : (
+                          '🔗 Conectar con Google'
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {!gcalStatus.configured && (
+                  <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 mb-4">
+                    <p className="text-yellow-400 text-sm">
+                      <strong>Configuración requerida:</strong> El administrador debe configurar las credenciales de Google OAuth
+                      (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) en el servidor.
+                    </p>
+                  </div>
+                )}
+
+                {gcalStatus.connected && (
+                  <>
+                    {/* Sincronización */}
+                    <div className="bg-[var(--bg-secondary)] rounded-xl p-5 border border-[var(--border-color)] mb-4">
+                      <h3 className="font-medium text-[var(--text-primary)] mb-3">🔄 Sincronización</h3>
+                      <p className="text-sm text-[var(--text-secondary)] mb-4">
+                        Las citas nuevas se sincronizan automáticamente. Usa este botón para sincronizar citas existentes.
+                      </p>
+                      <button
+                        onClick={syncCitasToGoogle}
+                        disabled={syncingCitas}
+                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {syncingCitas ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Sincronizando...
+                          </>
+                        ) : (
+                          '📤 Sincronizar citas pendientes'
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Info */}
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+                      <p className="text-blue-400 text-sm">
+                        <strong>Sincronización automática:</strong> Cuando creas, editas o eliminas una cita en NipponFlex,
+                        se actualiza automáticamente en Google Calendar.
+                      </p>
+                    </div>
+                  </>
                 )}
               </div>
             )}

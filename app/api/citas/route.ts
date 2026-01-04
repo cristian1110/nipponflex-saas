@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { query, queryOne } from '@/lib/db'
+import { syncCitaToGoogle, deleteEvent, getTokens } from '@/lib/integrations/google-calendar'
 
 export const dynamic = 'force-dynamic'
 
@@ -122,6 +123,16 @@ export async function POST(request: NextRequest) {
       ]
     )
 
+    // Sincronizar con Google Calendar si está conectado
+    try {
+      const googleTokens = await getTokens(user.cliente_id!)
+      if (googleTokens) {
+        await syncCitaToGoogle(user.cliente_id!, result.id)
+      }
+    } catch (e) {
+      console.log('Google Calendar no conectado o error de sync:', e)
+    }
+
     return NextResponse.json(result, { status: 201 })
   } catch (error) {
     console.error('Error creating cita:', error)
@@ -221,6 +232,16 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Cita no encontrada' }, { status: 404 })
     }
 
+    // Sincronizar cambios con Google Calendar si está conectado
+    try {
+      const googleTokens = await getTokens(user.cliente_id!)
+      if (googleTokens && result.google_event_id) {
+        await syncCitaToGoogle(user.cliente_id!, result.id)
+      }
+    } catch (e) {
+      console.log('Google Calendar sync error:', e)
+    }
+
     return NextResponse.json(result)
   } catch (error) {
     console.error('Error updating cita:', error)
@@ -242,6 +263,12 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'ID es requerido' }, { status: 400 })
     }
 
+    // Obtener cita antes de eliminar para saber el google_event_id
+    const cita = await queryOne(
+      `SELECT google_event_id FROM citas WHERE id = $1 AND cliente_id = $2`,
+      [id, user.cliente_id || 1]
+    )
+
     const result = await query(
       `DELETE FROM citas WHERE id = $1 AND cliente_id = $2 RETURNING id`,
       [id, user.cliente_id || 1]
@@ -249,6 +276,15 @@ export async function DELETE(request: NextRequest) {
 
     if (!result || result.length === 0) {
       return NextResponse.json({ error: 'Cita no encontrada' }, { status: 404 })
+    }
+
+    // Eliminar de Google Calendar si está sincronizado
+    if (cita?.google_event_id) {
+      try {
+        await deleteEvent(user.cliente_id!, cita.google_event_id)
+      } catch (e) {
+        console.log('Error eliminando evento de Google Calendar:', e)
+      }
     }
 
     return NextResponse.json({ success: true, deleted: id })
