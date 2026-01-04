@@ -51,8 +51,12 @@ export default function UsuariosPage() {
     nombre: '',
     email: '',
     telefono: '',
-    rol_id: ''
+    rol_id: '',
+    cliente_id: ''
   })
+
+  // Clientes (solo para super admin)
+  const [clientes, setClientes] = useState<{ id: number; nombre_empresa: string }[]>([])
 
   useEffect(() => { checkAuth() }, [])
 
@@ -64,7 +68,20 @@ export default function UsuariosPage() {
       setUser(data)
       loadData()
       loadRoles()
+      if (data.nivel >= 100) {
+        loadClientes()
+      }
     } catch { router.push('/login') }
+  }
+
+  const loadClientes = async () => {
+    try {
+      const res = await fetch('/api/admin/clientes')
+      if (res.ok) {
+        const data = await res.json()
+        setClientes(Array.isArray(data) ? data : [])
+      }
+    } catch (e) { console.error(e) }
   }
 
   const loadData = async () => {
@@ -103,7 +120,8 @@ export default function UsuariosPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...nuevoUsuario,
-          rol_id: nuevoUsuario.rol_id ? Number(nuevoUsuario.rol_id) : null
+          rol_id: nuevoUsuario.rol_id ? Number(nuevoUsuario.rol_id) : null,
+          cliente_id: nuevoUsuario.cliente_id ? Number(nuevoUsuario.cliente_id) : null
         })
       })
       const data = await res.json()
@@ -162,7 +180,7 @@ export default function UsuariosPage() {
     setShowCrear(false)
     setCredencialesCreadas(null)
     setMessage(null)
-    setNuevoUsuario({ nombre: '', email: '', telefono: '', rol_id: '' })
+    setNuevoUsuario({ nombre: '', email: '', telefono: '', rol_id: '', cliente_id: '' })
   }
 
   const toggleEstado = async (id: number, estadoActual: string) => {
@@ -404,6 +422,24 @@ export default function UsuariosPage() {
                   <p className="text-xs text-[var(--text-tertiary)] mt-1">Codigo de pais sin + (ej: 593 para Ecuador)</p>
                 </div>
 
+                {/* Selector de cliente - Solo para super admin */}
+                {isSuperAdmin && (
+                  <div>
+                    <label className="block text-sm text-[var(--text-secondary)] mb-1">Cliente/Empresa *</label>
+                    <select
+                      value={nuevoUsuario.cliente_id}
+                      onChange={(e) => setNuevoUsuario({ ...nuevoUsuario, cliente_id: e.target.value })}
+                      className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
+                    >
+                      <option value="">Seleccionar cliente...</option>
+                      {clientes.map(c => (
+                        <option key={c.id} value={c.id}>{c.nombre_empresa}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-[var(--text-tertiary)] mt-1">El usuario pertenecera a este cliente</p>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm text-[var(--text-secondary)] mb-1">Rol</label>
                   <select
@@ -413,9 +449,9 @@ export default function UsuariosPage() {
                   >
                     <option value="">Seleccionar rol...</option>
                     {roles
-                      .filter(r => r.nivel < user?.nivel) // Solo roles de menor nivel
+                      .filter(r => isSuperAdmin ? true : r.nivel < user?.nivel) // Super admin puede crear todos los roles
                       .map(r => (
-                        <option key={r.id} value={r.id}>{r.nombre}</option>
+                        <option key={r.id} value={r.id}>{r.nombre} {r.nivel >= 100 ? '(Super Admin)' : ''}</option>
                       ))
                     }
                   </select>

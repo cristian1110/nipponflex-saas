@@ -22,10 +22,10 @@ const menuItems = [
   { href: '/agentes', icon: '🤖', label: 'Agentes IA', minLevel: 3 },
   { href: '/reportes', icon: '📊', label: 'Reportes', minLevel: 3 },
   { href: '/usuarios', icon: '👤', label: 'Usuarios', minLevel: 4 },
-  { href: '/clientes', icon: '🏢', label: 'Clientes', minLevel: 5 },
   { href: '/integraciones', icon: '🔗', label: 'Integraciones', minLevel: 4 },
   { href: '/configuracion', icon: '⚙️', label: 'Configuración', minLevel: 3 },
   // Solo Super Admin (nivel 100)
+  { href: '/admin/sistema', icon: '🔧', label: 'Admin Sistema', minLevel: 100 },
   { href: '/admin/metricas', icon: '📈', label: 'Métricas APIs', minLevel: 100 },
 ]
 

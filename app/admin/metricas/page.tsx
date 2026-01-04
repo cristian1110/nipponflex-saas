@@ -97,7 +97,7 @@ export default function MetricasAPIPage() {
     return '$' + n.toFixed(4)
   }
 
-  if (loading && !user) {
+  if (loading || !user) {
     return (
       <div className="flex h-screen bg-[var(--bg-primary)] items-center justify-center">
         <div className="animate-spin h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full"></div>

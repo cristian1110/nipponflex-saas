@@ -119,6 +119,14 @@ export async function POST(request: NextRequest) {
       targetRolId = rolDefault?.id || 4
     }
 
+    // Verificar que solo super admin puede crear super admins
+    if (targetRolId) {
+      const rolInfo = await queryOne(`SELECT nivel FROM roles WHERE id = $1`, [targetRolId])
+      if (rolInfo?.nivel >= 100 && user.nivel < 100) {
+        return NextResponse.json({ error: 'No tienes permisos para crear usuarios super admin' }, { status: 403 })
+      }
+    }
+
     // Crear usuario
     const nuevoUsuario = await queryOne(
       `INSERT INTO usuarios (cliente_id, nombre, email, telefono, password_hash, rol_id, estado, debe_cambiar_password, created_at)
