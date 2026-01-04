@@ -43,7 +43,7 @@
 - [x] Crear `lib/elevenlabs.ts` para generar audio
 - [x] UI en Agentes → Opciones para activar respuestas con audio
 - [x] Integrado en webhook WhatsApp - responde con notas de voz
-- [ ] Clonar voz personalizada del usuario (opcional, futuro)
+- [x] Clonar voz personalizada del usuario (subir audio en Agentes → Opciones)
 
 ### 3. Integración Twilio/Vonage (Llamadas)
 - [ ] Decidir: Twilio o Vonage (Twilio es más popular, Vonage más barato)
@@ -57,7 +57,7 @@
 - [x] Opción en configuración del agente: "Responder con audio"
 - [x] Selector de voz de ElevenLabs
 - [x] Flujo: Texto IA → ElevenLabs → Audio → WhatsApp
-- [ ] Límite de caracteres según plan (futuro)
+- [x] Límite de caracteres según plan (max_caracteres_elevenlabs)
 
 ---
 
