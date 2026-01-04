@@ -213,6 +213,9 @@ export async function POST(request: NextRequest) {
       [lead.id]
     )
 
+    // Guardar tipo de mensaje original para decidir formato de respuesta
+    const mensajeEntranteEsAudio = tipo === 'audio'
+
     // Buscar agente activo (preferir configuracion_agente, fallback a agentes)
     let agente = await queryOne(
       `SELECT *, voice_id, responder_con_audio FROM configuracion_agente
@@ -364,11 +367,19 @@ export async function POST(request: NextRequest) {
       respuestaIA.content = limpiarRespuestaCita(respuestaIA.content)
     }
 
-    // Enviar respuesta por WhatsApp (audio o texto según configuración)
+    // Enviar respuesta por WhatsApp (audio si el usuario envió audio, texto si envió texto)
     let resultado
     let enviadoComoAudio = false
 
-    if (agente.responder_con_audio && agente.voice_id && process.env.ELEVENLABS_API_KEY) {
+    // Solo enviar audio si:
+    // 1. El agente tiene audio habilitado y configurado
+    // 2. El usuario envió un audio (responder en el mismo formato)
+    const debeEnviarAudio = agente.responder_con_audio &&
+                            agente.voice_id &&
+                            process.env.ELEVENLABS_API_KEY &&
+                            mensajeEntranteEsAudio
+
+    if (debeEnviarAudio) {
       // Verificar limite de caracteres ElevenLabs del plan
       const limiteInfo = await queryOne(
         `SELECT c.uso_elevenlabs_caracteres, p.max_caracteres_elevenlabs,

@@ -78,6 +78,8 @@ export default function AgentesPage() {
   const [activeTab, setActiveTab] = useState<'general' | 'conocimientos' | 'opciones'>('general')
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [clonandoVoz, setClonandoVoz] = useState(false)
+  const [eliminandoVoz, setEliminandoVoz] = useState<string | null>(null)
   const [mejorando, setMejorando] = useState(false)
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
   
@@ -713,27 +715,90 @@ export default function AgentesPage() {
                           Usa ElevenLabs para generar audio con voz natural. Costo aprox: $0.00003/caracter
                         </p>
 
+                        {/* Voces clonadas existentes */}
+                        {voces.filter(v => v.labels?.language === 'cloned' || v.name.includes('(')).length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
+                            <h5 className="font-medium text-[var(--text-primary)] mb-2">Tus voces clonadas</h5>
+                            <div className="space-y-2">
+                              {voces.filter(v => v.labels?.language === 'cloned' || v.name.includes('(')).map(voz => (
+                                <div key={voz.voice_id} className="flex items-center justify-between p-2 bg-[var(--bg-primary)] rounded-lg">
+                                  <span className="text-sm text-[var(--text-primary)]">{voz.name}</span>
+                                  <button
+                                    onClick={async () => {
+                                      if (!confirm('Eliminar esta voz clonada?')) return
+                                      setEliminandoVoz(voz.voice_id)
+                                      try {
+                                        const res = await fetch(`/api/elevenlabs/clonar-voz?voice_id=${voz.voice_id}`, { method: 'DELETE' })
+                                        const data = await res.json()
+                                        if (data.success) {
+                                          setVoces(voces.filter(v => v.voice_id !== voz.voice_id))
+                                          if (selectedAgente?.voice_id === voz.voice_id) {
+                                            setSelectedAgente({ ...selectedAgente, voice_id: null })
+                                          }
+                                        } else {
+                                          alert('Error: ' + data.error)
+                                        }
+                                      } catch { alert('Error de conexion') }
+                                      setEliminandoVoz(null)
+                                    }}
+                                    disabled={eliminandoVoz === voz.voice_id}
+                                    className="px-2 py-1 text-xs bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 disabled:opacity-50"
+                                  >
+                                    {eliminandoVoz === voz.voice_id ? 'Eliminando...' : 'Eliminar'}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Seccion de clonacion de voz */}
                         <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
                           <h5 className="font-medium text-[var(--text-primary)] mb-2">Clonar tu propia voz</h5>
-                          <p className="text-xs text-[var(--text-secondary)] mb-3">
-                            Sube un audio de tu voz (minimo 30 segundos) para crear una voz personalizada
-                          </p>
+
+                          {/* Tips de clonacion */}
+                          <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                            <p className="text-xs text-blue-400 font-medium mb-2">Consejos para mejor calidad:</p>
+                            <ul className="text-xs text-blue-300 space-y-1 list-disc list-inside">
+                              <li><strong>1-3 minutos</strong> de audio es ideal (minimo 30 seg)</li>
+                              <li>Habla claro en un <strong>ambiente silencioso</strong></li>
+                              <li>Usa un buen microfono o el del celular cerca</li>
+                              <li>Varia tu tono: preguntas, afirmaciones, emociones</li>
+                              <li>Formatos: MP3, WAV, M4A (max 10MB)</li>
+                            </ul>
+                          </div>
+
                           <div className="space-y-3">
                             <input
                               type="text"
                               placeholder="Nombre de la voz (ej: Mi Voz)"
                               className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm"
                               id="nombreVozClonada"
+                              disabled={clonandoVoz}
                             />
                             <input
                               type="file"
                               accept="audio/*"
                               className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:bg-emerald-600 file:text-white file:text-sm"
                               id="archivoVozClonada"
+                              disabled={clonandoVoz}
                             />
+
+                            {clonandoVoz && (
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 bg-[var(--bg-primary)] rounded-full h-2 overflow-hidden">
+                                    <div className="bg-purple-500 h-full animate-pulse" style={{ width: '100%' }}></div>
+                                  </div>
+                                  <span className="text-xs text-purple-400">Procesando...</span>
+                                </div>
+                                <p className="text-xs text-[var(--text-tertiary)]">Subiendo y procesando audio, puede tardar 30-60 segundos...</p>
+                              </div>
+                            )}
+
                             <button
                               type="button"
+                              disabled={clonandoVoz}
                               onClick={async () => {
                                 const nombreInput = document.getElementById('nombreVozClonada') as HTMLInputElement
                                 const archivoInput = document.getElementById('archivoVozClonada') as HTMLInputElement
@@ -745,6 +810,7 @@ export default function AgentesPage() {
                                   return
                                 }
 
+                                setClonandoVoz(true)
                                 const formData = new FormData()
                                 formData.append('nombre', nombre)
                                 formData.append('archivo', archivo)
@@ -757,8 +823,11 @@ export default function AgentesPage() {
                                   const data = await res.json()
 
                                   if (data.success) {
-                                    alert('Voz clonada exitosamente! Ahora puedes seleccionarla en la lista.')
+                                    alert('Voz clonada exitosamente! Ya esta seleccionada.')
                                     setSelectedAgente({ ...selectedAgente, voice_id: data.voice_id })
+                                    // Limpiar campos
+                                    nombreInput.value = ''
+                                    archivoInput.value = ''
                                     // Recargar voces
                                     const vocesRes = await fetch('/api/elevenlabs/voces')
                                     if (vocesRes.ok) {
@@ -771,10 +840,18 @@ export default function AgentesPage() {
                                 } catch (e) {
                                   alert('Error de conexion')
                                 }
+                                setClonandoVoz(false)
                               }}
-                              className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
+                              className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
-                              Clonar Voz
+                              {clonandoVoz ? (
+                                <>
+                                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                  Clonando voz...
+                                </>
+                              ) : (
+                                'Clonar Voz'
+                              )}
                             </button>
                           </div>
                         </div>

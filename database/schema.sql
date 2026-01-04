@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS leads (
     notas TEXT,
     asignado_a INTEGER REFERENCES usuarios(id),
     ultimo_contacto TIMESTAMP,
+    prefiere_audio BOOLEAN DEFAULT NULL,
+    esperando_preferencia_audio BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );

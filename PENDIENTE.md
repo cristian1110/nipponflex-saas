@@ -1,7 +1,28 @@
 # NipponFlex - Estado del Proyecto
-> Última actualización: 3 de enero 2026, 12:30 PM
+> Última actualización: 4 de enero 2026, 02:05 AM
 
 ## ✅ COMPLETADO HOY
+
+### 5. Mejoras UI Clonación de Voz
+- Barra de progreso mientras se clona la voz
+- Botón deshabilitado durante clonación (evita clicks múltiples)
+- Opción para eliminar voces clonadas
+- Consejos para mejor clonación (1-3 min audio, ambiente silencioso)
+
+### 6. Preferencia de Audio del Usuario
+- El agente pregunta al usuario si prefiere audio o texto
+- Guarda preferencia en tabla leads (`prefiere_audio`)
+- Respeta la preferencia en futuras conversaciones
+- Respuesta automática confirmando la preferencia elegida
+
+### 7. Sistema de Usuarios Mejorado (sesión anterior)
+- Crear usuarios con contraseña auto-generada
+- Enviar credenciales por email/WhatsApp/copiar
+- Forzar cambio de contraseña en primer inicio
+
+---
+
+## ✅ COMPLETADO ANTERIORMENTE
 
 ### 1. Servicios Restaurados
 - **Qdrant RAG** - URL interna Docker (antes fallaba por proxy)
@@ -115,19 +136,20 @@ logs_api (
   cliente_id, servicio, endpoint, tokens_input, tokens_output,
   costo_usd, duracion_ms, modelo, metadata
 )
+
+-- Columnas nuevas en leads (para preferencia audio)
+leads.prefiere_audio BOOLEAN DEFAULT NULL  -- NULL=no preguntado, true=audio, false=texto
+leads.esperando_preferencia_audio BOOLEAN DEFAULT FALSE  -- true cuando esperamos respuesta
 ```
 
 ---
 
-## 🎯 PARA RETOMAR EN LA NOCHE
+## 🎯 PRÓXIMOS PASOS
 
-1. **Primero**: Decidir si usar Twilio o Vonage para llamadas
-2. **Segundo**: Crear cuenta en ElevenLabs y obtener API key
-3. **Tercero**: Implementar las integraciones en orden:
-   - ElevenLabs (más simple, solo TTS)
-   - Twilio/Vonage (más complejo, requiere webhooks)
-   - Respuestas con audio (combina ambos)
-4. **Cuarto**: Multi-idioma (si queda tiempo)
+1. **Twilio/Vonage para llamadas** - Decidir proveedor e implementar
+2. **Multi-idioma (ES/EN)** - Sistema i18n
+3. **Pruebas de audio** - Verificar flujo completo de preferencia de audio
+4. **Optimizaciones** - Mejorar tiempos de respuesta
 
 ---
 
