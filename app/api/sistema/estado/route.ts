@@ -19,8 +19,8 @@ export async function GET() {
 
     // Verificar si tiene agente activo
     const agente = await queryOne(`
-      SELECT id, activo FROM agentes
-      WHERE cliente_id = $1 AND activo = true
+      SELECT id, estado FROM agentes
+      WHERE cliente_id = $1 AND estado = 'activo'
       LIMIT 1
     `, [user.cliente_id])
 

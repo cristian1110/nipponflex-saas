@@ -947,6 +947,15 @@ export default function CRMPage() {
                       <div className="bg-yellow-500/20 p-2 rounded"><div className="text-yellow-400 font-bold">{importResult.duplicados}</div><div className="text-xs">Duplicados</div></div>
                       <div className="bg-red-500/20 p-2 rounded"><div className="text-red-400 font-bold">{importResult.errores}</div><div className="text-xs">Errores</div></div>
                     </div>
+                    {importResult.omitidos_por_limite > 0 && (
+                      <div className="mt-3 p-3 bg-orange-500/20 rounded-lg text-sm">
+                        <p className="text-orange-400 font-medium">Limite alcanzado</p>
+                        <p className="text-orange-300 text-xs mt-1">
+                          {importResult.omitidos_por_limite} contactos no se importaron por alcanzar el limite de {importResult.limite} contactos.
+                        </p>
+                        <p className="text-orange-300 text-xs">Total actual: {importResult.contactos_actuales}/{importResult.limite}</p>
+                      </div>
+                    )}
                   </>
                 )}
                 <button onClick={() => { setShowImport(false); setImportResult(null) }} className="mt-4 px-4 py-2 bg-emerald-600 text-white rounded-lg">Cerrar</button>

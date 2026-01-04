@@ -14,6 +14,7 @@ interface Conversacion {
   fecha: string
   no_leidos: number
   canal: 'whatsapp' | 'telegram' | 'instagram'
+  lead_id?: number | null
 }
 
 interface Mensaje {
@@ -442,8 +443,8 @@ export default function ConversacionesPage() {
                   <h2 className="font-medium text-[var(--text-primary)]">{selectedConv.nombre}</h2>
                   <p className="text-xs text-[var(--text-secondary)]">{selectedConv.numero} • WhatsApp</p>
                 </div>
-                {/* Botón crear contacto - solo si el nombre es igual al número (no es un contacto conocido) */}
-                {(selectedConv.nombre === selectedConv.numero || selectedConv.nombre.startsWith('+')) && (
+                {/* Botón crear contacto - solo si no tiene lead_id (no es un contacto conocido) */}
+                {!selectedConv.lead_id && (
                   <button
                     onClick={() => { setNewContactName(''); setNewContactEmail(''); setShowCreateContact(true); }}
                     className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"

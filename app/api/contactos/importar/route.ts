@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { query } from '@/lib/db'
+import { query, queryOne } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -16,15 +16,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 })
     }
 
+    // Verificar límite de contactos del plan
+    const cliente = await queryOne(`
+      SELECT c.limite_contactos,
+             (SELECT COUNT(*) FROM contactos WHERE cliente_id = c.id) +
+             (SELECT COUNT(*) FROM leads WHERE cliente_id = c.id) as contactos_actuales
+      FROM clientes c
+      WHERE c.id = $1
+    `, [user.cliente_id])
+
+    const limiteContactos = cliente?.limite_contactos || 500
+    const contactosActuales = parseInt(cliente?.contactos_actuales || '0')
+    const espacioDisponible = Math.max(0, limiteContactos - contactosActuales)
+
+    // Si ya está en el límite, no permitir importación
+    if (espacioDisponible <= 0) {
+      return NextResponse.json({
+        error: `Has alcanzado el límite de ${limiteContactos} contactos de tu plan. Elimina contactos o mejora tu plan.`,
+        limite: limiteContactos,
+        actuales: contactosActuales,
+        disponibles: 0
+      }, { status: 400 })
+    }
+
+    // Limitar la cantidad a importar según el espacio disponible
+    const contactosAImportar = contactos.slice(0, espacioDisponible)
+    const contactosOmitidos = contactos.length - contactosAImportar.length
+
     let importados = 0
     let duplicados = 0
     let errores = 0
 
     // Procesar en batches de 100
     const batchSize = 100
-    
-    for (let i = 0; i < contactos.length; i += batchSize) {
-      const batch = contactos.slice(i, i + batchSize)
+
+    for (let i = 0; i < contactosAImportar.length; i += batchSize) {
+      const batch = contactosAImportar.slice(i, i + batchSize)
       
       // Preparar valores para INSERT masivo
       const values: any[] = []
@@ -72,12 +99,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      importados, 
-      duplicados, 
-      errores, 
-      total: contactos.length 
+    return NextResponse.json({
+      success: true,
+      importados,
+      duplicados,
+      errores,
+      omitidos_por_limite: contactosOmitidos,
+      total: contactos.length,
+      limite: limiteContactos,
+      contactos_actuales: contactosActuales + importados,
+      mensaje: contactosOmitidos > 0
+        ? `Se importaron ${importados} contactos. ${contactosOmitidos} fueron omitidos por alcanzar el límite de ${limiteContactos} contactos.`
+        : undefined
     })
   } catch (error) {
     console.error('Error importar:', error)
