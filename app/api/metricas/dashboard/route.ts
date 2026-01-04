@@ -32,11 +32,11 @@ export async function GET(request: NextRequest) {
     `, [user.cliente_id])
 
     // Query optimizada: métricas de uso en una sola consulta
+    // Solo contamos leads (contactos reales del CRM), no conversaciones
     const uso = await queryOne(`
       SELECT
         (SELECT COUNT(*) FROM campanias WHERE cliente_id = $1 AND estado IN ('activa', 'pausada')) as campanas_activas,
-        (SELECT COUNT(*) FROM leads WHERE cliente_id = $1) +
-        (SELECT COUNT(*) FROM contactos WHERE cliente_id = $1) as contactos_totales
+        (SELECT COUNT(*) FROM leads WHERE cliente_id = $1) as contactos_totales
     `, [user.cliente_id])
 
     // Query optimizada: mensajes por día con parámetro

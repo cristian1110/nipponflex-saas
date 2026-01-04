@@ -39,16 +39,25 @@ interface Metricas {
   respuestasPorHora: { hora: string; respuestas: number }[]
 }
 
+interface EstadoSistema {
+  whatsapp: { conectado: boolean; estado: string }
+  agente: { activo: boolean; id: number | null }
+  database: { online: boolean }
+  worker: { estado: string }
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [stats, setStats] = useState({ leads: 0, leadsHoy: 0, mensajes: 0, citas: 0 })
   const [metricas, setMetricas] = useState<Metricas | null>(null)
+  const [estadoSistema, setEstadoSistema] = useState<EstadoSistema | null>(null)
   const [periodo, setPeriodo] = useState('semana')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { checkAuth() }, [])
   useEffect(() => { if (user) loadMetricas() }, [periodo, user])
+  useEffect(() => { if (user) loadEstadoSistema() }, [user])
 
   const checkAuth = async () => {
     try {
@@ -79,6 +88,13 @@ export default function DashboardPage() {
     try {
       const res = await fetch(`/api/metricas/dashboard?periodo=${periodo}`)
       if (res.ok) setMetricas(await res.json())
+    } catch (e) { console.error(e) }
+  }
+
+  const loadEstadoSistema = async () => {
+    try {
+      const res = await fetch('/api/sistema/estado')
+      if (res.ok) setEstadoSistema(await res.json())
     } catch (e) { console.error(e) }
   }
 
@@ -246,11 +262,29 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-[var(--text-secondary)]">WhatsApp</span>
-                  <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">Conectado</span>
+                  {estadoSistema ? (
+                    estadoSistema.whatsapp.conectado ? (
+                      <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">Conectado</span>
+                    ) : estadoSistema.whatsapp.estado === 'no_configurado' ? (
+                      <span className="px-2 py-1 bg-gray-500/20 text-gray-400 rounded text-xs">No configurado</span>
+                    ) : (
+                      <span className="px-2 py-1 bg-yellow-500/20 text-yellow-400 rounded text-xs">Desconectado</span>
+                    )
+                  ) : (
+                    <span className="px-2 py-1 bg-gray-500/20 text-gray-400 rounded text-xs">Cargando...</span>
+                  )}
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[var(--text-secondary)]">Agente IA</span>
-                  <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">Activo</span>
+                  {estadoSistema ? (
+                    estadoSistema.agente.activo ? (
+                      <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">Activo</span>
+                    ) : (
+                      <span className="px-2 py-1 bg-gray-500/20 text-gray-400 rounded text-xs">Sin agente</span>
+                    )
+                  ) : (
+                    <span className="px-2 py-1 bg-gray-500/20 text-gray-400 rounded text-xs">Cargando...</span>
+                  )}
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[var(--text-secondary)]">Worker Cola</span>
@@ -258,7 +292,15 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[var(--text-secondary)]">Base de datos</span>
-                  <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">Online</span>
+                  {estadoSistema ? (
+                    estadoSistema.database.online ? (
+                      <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">Online</span>
+                    ) : (
+                      <span className="px-2 py-1 bg-red-500/20 text-red-400 rounded text-xs">Offline</span>
+                    )
+                  ) : (
+                    <span className="px-2 py-1 bg-gray-500/20 text-gray-400 rounded text-xs">Cargando...</span>
+                  )}
                 </div>
               </div>
             </div>

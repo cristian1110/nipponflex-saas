@@ -40,6 +40,10 @@ export default function ConversacionesPage() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [filePreview, setFilePreview] = useState<string | null>(null)
+  const [showCreateContact, setShowCreateContact] = useState(false)
+  const [creatingContact, setCreatingContact] = useState(false)
+  const [newContactName, setNewContactName] = useState('')
+  const [newContactEmail, setNewContactEmail] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const selectedConvRef = useRef<Conversacion | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -266,14 +270,14 @@ export default function ConversacionesPage() {
 
   const crearNuevaConversacion = () => {
     if (!newChatNumber.trim()) return
-    
+
     let numero = newChatNumber.trim()
     if (!numero.startsWith('+')) {
       if (numero.startsWith('593')) numero = '+' + numero
       else if (numero.startsWith('0')) numero = '+593' + numero.substring(1)
       else numero = '+593' + numero
     }
-    
+
     const nuevaConv: Conversacion = {
       id: `new_${numero.replace('+', '')}`,
       numero: numero,
@@ -283,12 +287,50 @@ export default function ConversacionesPage() {
       no_leidos: 0,
       canal: 'whatsapp'
     }
-    
+
     setSelectedConv(nuevaConv)
     setMensajes([])
     setShowNewChat(false)
     setNewChatNumber('')
     setNewChatName('')
+  }
+
+  const crearContactoDesdeConversacion = async () => {
+    if (!selectedConv || !newContactName.trim()) return
+
+    setCreatingContact(true)
+    try {
+      // Crear lead en el CRM
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre: newContactName.trim(),
+          telefono: selectedConv.numero,
+          email: newContactEmail.trim() || null,
+          origen: 'whatsapp',
+          notas: `Contacto creado desde conversación de WhatsApp`
+        })
+      })
+
+      if (res.ok) {
+        alert('Contacto creado correctamente')
+        setShowCreateContact(false)
+        setNewContactName('')
+        setNewContactEmail('')
+        // Actualizar el nombre en la conversación localmente
+        setSelectedConv(prev => prev ? { ...prev, nombre: newContactName.trim() } : null)
+        // Recargar conversaciones
+        await loadConversaciones()
+      } else {
+        const data = await res.json()
+        alert('Error al crear contacto: ' + (data.error || 'Intenta de nuevo'))
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Error al crear contacto')
+    }
+    setCreatingContact(false)
   }
 
   const filteredConversaciones = conversaciones.filter(c =>
@@ -400,8 +442,18 @@ export default function ConversacionesPage() {
                   <h2 className="font-medium text-[var(--text-primary)]">{selectedConv.nombre}</h2>
                   <p className="text-xs text-[var(--text-secondary)]">{selectedConv.numero} • WhatsApp</p>
                 </div>
-                <button 
-                  onClick={() => loadMensajes(selectedConv.numero)} 
+                {/* Botón crear contacto - solo si el nombre es igual al número (no es un contacto conocido) */}
+                {(selectedConv.nombre === selectedConv.numero || selectedConv.nombre.startsWith('+')) && (
+                  <button
+                    onClick={() => { setNewContactName(''); setNewContactEmail(''); setShowCreateContact(true); }}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+                    title="Agregar como contacto"
+                  >
+                    👤+ Crear contacto
+                  </button>
+                )}
+                <button
+                  onClick={() => loadMensajes(selectedConv.numero)}
                   className="p-2 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg"
                   title="Actualizar"
                 >
@@ -552,28 +604,78 @@ export default function ConversacionesPage() {
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-[var(--text-secondary)]">Número de WhatsApp *</label>
-                <input 
-                  type="tel" 
-                  placeholder="0999999999" 
+                <input
+                  type="tel"
+                  placeholder="0999999999"
                   value={newChatNumber}
                   onChange={(e) => setNewChatNumber(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" 
+                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
                 />
               </div>
               <div>
                 <label className="text-xs text-[var(--text-secondary)]">Nombre (opcional)</label>
-                <input 
-                  type="text" 
-                  placeholder="Nombre del contacto" 
+                <input
+                  type="text"
+                  placeholder="Nombre del contacto"
                   value={newChatName}
                   onChange={(e) => setNewChatName(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]" 
+                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
                 />
               </div>
             </div>
             <div className="flex gap-2 mt-4">
               <button onClick={() => setShowNewChat(false)} className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]">Cancelar</button>
               <button onClick={crearNuevaConversacion} disabled={!newChatNumber.trim()} className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm disabled:opacity-50">Iniciar Chat</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Crear Contacto */}
+      {showCreateContact && selectedConv && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--bg-secondary)] rounded-xl p-5 w-full max-w-sm">
+            <h3 className="font-bold text-[var(--text-primary)] mb-4">👤 Crear Contacto</h3>
+            <p className="text-sm text-[var(--text-secondary)] mb-4">
+              Agregar <strong>{selectedConv.numero}</strong> como contacto en el CRM
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-[var(--text-secondary)]">Nombre *</label>
+                <input
+                  type="text"
+                  placeholder="Nombre del contacto"
+                  value={newContactName}
+                  onChange={(e) => setNewContactName(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-secondary)]">Email (opcional)</label>
+                <input
+                  type="email"
+                  placeholder="correo@ejemplo.com"
+                  value={newContactEmail}
+                  onChange={(e) => setNewContactEmail(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)]"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => setShowCreateContact(false)}
+                disabled={creatingContact}
+                className="flex-1 px-3 py-2 border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={crearContactoDesdeConversacion}
+                disabled={!newContactName.trim() || creatingContact}
+                className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50"
+              >
+                {creatingContact ? 'Creando...' : 'Crear Contacto'}
+              </button>
             </div>
           </div>
         </div>
