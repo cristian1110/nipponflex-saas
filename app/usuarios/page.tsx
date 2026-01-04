@@ -10,52 +10,48 @@ interface Usuario {
   id: number
   nombre: string
   email: string
+  telefono?: string
   rol: string
   nivel: number
   estado: string
+  debe_cambiar_password?: boolean
+  ultimo_login?: string
   created_at: string
+  cliente_nombre?: string
 }
 
-interface Invitacion {
+interface Rol {
   id: number
   nombre: string
+  nivel: number
+}
+
+interface CredencialesCreadas {
   email: string
-  tipo: string
-  estado: string
-  plan_nombre?: string
-  token?: string
-  expira_at: string
-  created_at: string
-}
-
-interface Plan {
-  id: number
-  nombre: string
-  descripcion: string
+  password: string
+  telefono?: string
 }
 
 export default function UsuariosPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'invitaciones'>('usuarios')
-  
   const [usuarios, setUsuarios] = useState<Usuario[]>([])
-  const [invitaciones, setInvitaciones] = useState<Invitacion[]>([])
-  const [planes, setPlanes] = useState<Plan[]>([])
-  
-  const [showInvitar, setShowInvitar] = useState(false)
-  const [invitando, setInvitando] = useState(false)
+  const [roles, setRoles] = useState<Rol[]>([])
+
+  const [showCrear, setShowCrear] = useState(false)
+  const [creando, setCreando] = useState(false)
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
-  const [linkGenerado, setLinkGenerado] = useState<string | null>(null)
-  
-  const [newInvite, setNewInvite] = useState({
+
+  // Credenciales generadas al crear usuario
+  const [credencialesCreadas, setCredencialesCreadas] = useState<CredencialesCreadas | null>(null)
+  const [enviandoCredenciales, setEnviandoCredenciales] = useState(false)
+
+  const [nuevoUsuario, setNuevoUsuario] = useState({
     nombre: '',
     email: '',
-    tipo: 'cliente',
-    plan_id: '',
-    limite_contactos: 500,
-    limite_mensajes: 1000
+    telefono: '',
+    rol_id: ''
   })
 
   useEffect(() => { checkAuth() }, [])
@@ -65,103 +61,122 @@ export default function UsuariosPage() {
       const res = await fetch('/api/auth/me')
       if (!res.ok) { router.push('/login'); return }
       const data = await res.json()
-      console.log('Usuario actual:', data) // Debug
       setUser(data)
       loadData()
-      loadPlanes()
+      loadRoles()
     } catch { router.push('/login') }
   }
 
   const loadData = async () => {
     try {
-      const resUsuarios = await fetch('/api/usuarios')
-      if (resUsuarios.ok) {
-        const data = await resUsuarios.json()
+      const res = await fetch('/api/usuarios')
+      if (res.ok) {
+        const data = await res.json()
         setUsuarios(Array.isArray(data) ? data : [])
-      }
-      
-      const resInvitaciones = await fetch('/api/admin/invitaciones')
-      if (resInvitaciones.ok) {
-        const data = await resInvitaciones.json()
-        setInvitaciones(Array.isArray(data) ? data : [])
       }
     } catch (e) { console.error(e) }
     setLoading(false)
   }
 
-  const loadPlanes = async () => {
+  const loadRoles = async () => {
     try {
-      const res = await fetch('/api/planes')
+      const res = await fetch('/api/roles')
       if (res.ok) {
         const data = await res.json()
-        setPlanes(Array.isArray(data) ? data : [])
+        setRoles(Array.isArray(data) ? data : [])
       }
     } catch (e) { console.error(e) }
   }
 
-  const enviarInvitacion = async () => {
-    if (!newInvite.nombre || !newInvite.email) {
+  const crearUsuario = async () => {
+    if (!nuevoUsuario.nombre || !nuevoUsuario.email) {
       setMessage({ type: 'error', text: 'Nombre y email son requeridos' })
       return
     }
 
-    setInvitando(true)
+    setCreando(true)
     setMessage(null)
-    setLinkGenerado(null)
 
     try {
-      const res = await fetch('/api/admin/invitaciones', {
+      const res = await fetch('/api/usuarios', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...newInvite,
-          plan_id: newInvite.plan_id ? Number(newInvite.plan_id) : null
+          ...nuevoUsuario,
+          rol_id: nuevoUsuario.rol_id ? Number(nuevoUsuario.rol_id) : null
         })
       })
       const data = await res.json()
 
       if (data.success) {
-        setMessage({ 
-          type: 'success', 
-          text: data.email_enviado 
-            ? `Invitacion enviada a ${newInvite.email}` 
-            : `Invitacion creada (configura email SMTP para enviar automaticamente)`
+        setMessage({ type: 'success', text: 'Usuario creado exitosamente' })
+        setCredencialesCreadas({
+          email: data.credenciales.email,
+          password: data.credenciales.password,
+          telefono: nuevoUsuario.telefono
         })
-        setLinkGenerado(data.link)
         loadData()
       } else {
-        setMessage({ type: 'error', text: data.error || 'Error al crear invitacion' })
+        setMessage({ type: 'error', text: data.error || 'Error al crear usuario' })
       }
     } catch (e) {
       setMessage({ type: 'error', text: 'Error de conexion' })
     }
-    setInvitando(false)
+    setCreando(false)
   }
 
-  const cancelarInvitacion = async (id: number) => {
-    if (!confirm('Cancelar esta invitacion?')) return
+  const enviarCredenciales = async (metodo: 'email' | 'whatsapp') => {
+    if (!credencialesCreadas) return
+
+    setEnviandoCredenciales(true)
     try {
-      await fetch(`/api/admin/invitaciones?id=${id}`, { method: 'DELETE' })
-      loadData()
+      const res = await fetch('/api/usuarios/enviar-credenciales', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: credencialesCreadas.email,
+          password: credencialesCreadas.password,
+          telefono: credencialesCreadas.telefono,
+          metodo
+        })
+      })
+      const data = await res.json()
+      setMessage({
+        type: data.success ? 'success' : 'error',
+        text: data.mensaje || data.error
+      })
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Error al enviar credenciales' })
+    }
+    setEnviandoCredenciales(false)
+  }
+
+  const copiarCredenciales = () => {
+    if (!credencialesCreadas) return
+    const texto = `Email: ${credencialesCreadas.email}\nContrasena: ${credencialesCreadas.password}`
+    navigator.clipboard.writeText(texto)
+    setMessage({ type: 'success', text: 'Credenciales copiadas al portapapeles' })
+  }
+
+  const cerrarModal = () => {
+    setShowCrear(false)
+    setCredencialesCreadas(null)
+    setMessage(null)
+    setNuevoUsuario({ nombre: '', email: '', telefono: '', rol_id: '' })
+  }
+
+  const toggleEstado = async (id: number, estadoActual: string) => {
+    const nuevoEstado = estadoActual === 'activo' ? 'inactivo' : 'activo'
+    try {
+      const res = await fetch('/api/usuarios', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, estado: nuevoEstado })
+      })
+      if (res.ok) loadData()
     } catch (e) { console.error(e) }
   }
 
-  const copiarLink = (text: string) => {
-    navigator.clipboard.writeText(text)
-    setMessage({ type: 'success', text: 'Link copiado al portapapeles' })
-  }
-
-  const getEstadoColor = (estado: string) => {
-    switch (estado) {
-      case 'pendiente': return 'bg-yellow-500/20 text-yellow-400'
-      case 'aceptada': return 'bg-emerald-500/20 text-emerald-400'
-      case 'expirada': return 'bg-gray-500/20 text-gray-400'
-      case 'cancelada': return 'bg-red-500/20 text-red-400'
-      default: return 'bg-gray-500/20 text-gray-400'
-    }
-  }
-
-  // Verificar permisos - nivel >= 50 es admin o superadmin
   const isAdmin = user?.nivel >= 50
   const isSuperAdmin = user?.nivel >= 100
 
@@ -180,191 +195,116 @@ export default function UsuariosPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-[var(--bg-secondary)] border-b border-[var(--border-color)] px-6 py-4 flex justify-between items-center">
           <div>
-            <h1 className="text-xl font-bold text-[var(--text-primary)]">👥 Usuarios</h1>
-            <p className="text-sm text-[var(--text-secondary)]">Gestiona usuarios e invitaciones</p>
+            <h1 className="text-xl font-bold text-[var(--text-primary)]">Usuarios</h1>
+            <p className="text-sm text-[var(--text-secondary)]">Gestiona los usuarios de tu cuenta</p>
           </div>
           {isAdmin && (
             <button
-              onClick={() => { setShowInvitar(true); setMessage(null); setLinkGenerado(null); setNewInvite({ nombre: '', email: '', tipo: 'cliente', plan_id: '', limite_contactos: 500, limite_mensajes: 1000 }); }}
+              onClick={() => setShowCrear(true)}
               className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2"
             >
-              <span>+</span> Invitar Usuario
+              <span>+</span> Nuevo Usuario
             </button>
           )}
-        </div>
-
-        {/* Tabs */}
-        <div className="bg-[var(--bg-secondary)] border-b border-[var(--border-color)] px-6">
-          <div className="flex gap-4">
-            <button
-              onClick={() => setActiveTab('usuarios')}
-              className={`py-3 px-1 border-b-2 transition-colors ${
-                activeTab === 'usuarios' 
-                  ? 'border-emerald-500 text-emerald-500' 
-                  : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              👤 Usuarios Activos ({usuarios.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('invitaciones')}
-              className={`py-3 px-1 border-b-2 transition-colors ${
-                activeTab === 'invitaciones' 
-                  ? 'border-emerald-500 text-emerald-500' 
-                  : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              📧 Invitaciones ({invitaciones.filter(i => i.estado === 'pendiente').length} pendientes)
-            </button>
-          </div>
         </div>
 
         <div className="flex-1 overflow-auto p-6">
-          {/* Tab Usuarios */}
-          {activeTab === 'usuarios' && (
-            <div className="space-y-4">
-              {usuarios.length === 0 ? (
-                <div className="text-center py-12 bg-[var(--bg-secondary)] rounded-xl">
-                  <div className="text-4xl mb-3">👥</div>
-                  <p className="text-[var(--text-secondary)]">No hay usuarios registrados</p>
-                  {isAdmin && (
-                    <button onClick={() => setShowInvitar(true)} className="mt-4 text-emerald-500 hover:underline">
-                      + Invitar primer usuario
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] overflow-hidden">
-                  <table className="w-full">
-                    <thead className="bg-[var(--bg-tertiary)]">
-                      <tr>
-                        <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Usuario</th>
-                        <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Email</th>
-                        <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Rol</th>
-                        <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Estado</th>
-                        <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Registro</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usuarios.map(u => (
-                        <tr key={u.id} className="border-t border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white font-medium">
-                                {u.nombre?.charAt(0).toUpperCase() || '?'}
-                              </div>
-                              <span className="text-[var(--text-primary)]">{u.nombre}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-[var(--text-secondary)]">{u.email}</td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded text-xs ${
-                              u.nivel >= 100 ? 'bg-purple-500/20 text-purple-400' :
-                              u.nivel >= 50 ? 'bg-blue-500/20 text-blue-400' :
-                              u.nivel >= 30 ? 'bg-cyan-500/20 text-cyan-400' :
-                              'bg-gray-500/20 text-gray-400'
-                            }`}>
-                              {u.rol}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded text-xs ${u.estado === 'activo' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                              {u.estado}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-[var(--text-tertiary)] text-sm">
-                            {u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+          {usuarios.length === 0 ? (
+            <div className="text-center py-12 bg-[var(--bg-secondary)] rounded-xl">
+              <div className="text-4xl mb-3">👥</div>
+              <p className="text-[var(--text-secondary)]">No hay usuarios registrados</p>
+              {isAdmin && (
+                <button onClick={() => setShowCrear(true)} className="mt-4 text-emerald-500 hover:underline">
+                  + Crear primer usuario
+                </button>
               )}
             </div>
-          )}
-
-          {/* Tab Invitaciones */}
-          {activeTab === 'invitaciones' && (
-            <div className="space-y-4">
-              {invitaciones.length === 0 ? (
-                <div className="text-center py-12 bg-[var(--bg-secondary)] rounded-xl">
-                  <div className="text-4xl mb-3">📧</div>
-                  <p className="text-[var(--text-secondary)]">No hay invitaciones</p>
-                  {isAdmin && (
-                    <button onClick={() => setShowInvitar(true)} className="mt-4 text-emerald-500 hover:underline">
-                      + Crear primera invitacion
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {invitaciones.map(inv => (
-                    <div key={inv.id} className="bg-[var(--bg-secondary)] rounded-xl p-4 border border-[var(--border-color)]">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white">
-                            {inv.nombre?.charAt(0).toUpperCase() || '?'}
+          ) : (
+            <div className="bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-[var(--bg-tertiary)]">
+                  <tr>
+                    <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Usuario</th>
+                    <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Email</th>
+                    {isSuperAdmin && <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Cliente</th>}
+                    <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Rol</th>
+                    <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Estado</th>
+                    <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Ultimo Login</th>
+                    {isAdmin && <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Acciones</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {usuarios.map(u => (
+                    <tr key={u.id} className="border-t border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white font-medium">
+                            {u.nombre?.charAt(0).toUpperCase() || '?'}
                           </div>
                           <div>
-                            <p className="font-medium text-[var(--text-primary)]">{inv.nombre}</p>
-                            <p className="text-sm text-[var(--text-secondary)]">{inv.email}</p>
+                            <span className="text-[var(--text-primary)]">{u.nombre}</span>
+                            {u.debe_cambiar_password && (
+                              <span className="ml-2 text-xs text-yellow-500" title="Debe cambiar contrasena">*</span>
+                            )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className={`px-2 py-1 rounded text-xs ${
-                            inv.tipo === 'cliente' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'
-                          }`}>
-                            {inv.tipo === 'cliente' ? 'Cliente' : 'Sub-usuario'}
-                          </span>
-                          {inv.plan_nombre && (
-                            <span className="px-2 py-1 rounded text-xs bg-emerald-500/20 text-emerald-400">
-                              {inv.plan_nombre}
-                            </span>
-                          )}
-                          <span className={`px-2 py-1 rounded text-xs ${getEstadoColor(inv.estado)}`}>
-                            {inv.estado}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      {inv.estado === 'pendiente' && inv.token && (
-                        <div className="mt-3 pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
-                          <p className="text-xs text-[var(--text-tertiary)]">
-                            Expira: {new Date(inv.expira_at).toLocaleString()}
-                          </p>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => copiarLink(`${window.location.origin}/activar/${inv.token}`)}
-                              className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-                            >
-                              📋 Copiar link
-                            </button>
-                            <button
-                              onClick={() => cancelarInvitacion(inv.id)}
-                              className="px-3 py-1 bg-red-500/20 text-red-400 rounded text-sm hover:bg-red-500/30"
-                            >
-                              Cancelar
-                            </button>
-                          </div>
-                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[var(--text-secondary)]">{u.email}</td>
+                      {isSuperAdmin && (
+                        <td className="px-4 py-3 text-[var(--text-secondary)]">{u.cliente_nombre || '-'}</td>
                       )}
-                    </div>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded text-xs ${
+                          u.nivel >= 100 ? 'bg-purple-500/20 text-purple-400' :
+                          u.nivel >= 50 ? 'bg-blue-500/20 text-blue-400' :
+                          u.nivel >= 30 ? 'bg-cyan-500/20 text-cyan-400' :
+                          'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {u.rol || 'Sin rol'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded text-xs ${u.estado === 'activo' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {u.estado}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-[var(--text-tertiary)] text-sm">
+                        {u.ultimo_login ? new Date(u.ultimo_login).toLocaleString() : 'Nunca'}
+                      </td>
+                      {isAdmin && (
+                        <td className="px-4 py-3">
+                          {u.id !== user?.id && (
+                            <button
+                              onClick={() => toggleEstado(u.id, u.estado)}
+                              className={`px-3 py-1 rounded text-xs ${
+                                u.estado === 'activo'
+                                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                                  : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                              }`}
+                            >
+                              {u.estado === 'activo' ? 'Desactivar' : 'Activar'}
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
                   ))}
-                </div>
-              )}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
       </div>
 
-      {/* Modal Invitar */}
-      {showInvitar && (
+      {/* Modal Crear Usuario */}
+      {showCrear && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-[var(--bg-secondary)] rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-[var(--text-primary)]">➕ Invitar Usuario</h3>
-              <button onClick={() => setShowInvitar(false)} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
+              <h3 className="text-lg font-bold text-[var(--text-primary)]">
+                {credencialesCreadas ? 'Usuario Creado' : 'Nuevo Usuario'}
+              </h3>
+              <button onClick={cerrarModal} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
             </div>
 
             {message && (
@@ -373,111 +313,137 @@ export default function UsuariosPage() {
               </div>
             )}
 
-            {linkGenerado && (
-              <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg mb-4">
-                <p className="text-xs text-blue-400 mb-2">📎 Link de activacion (comparte con el usuario):</p>
-                <div className="flex gap-2">
-                  <input type="text" value={linkGenerado} readOnly className="flex-1 px-2 py-1 bg-[var(--bg-primary)] rounded text-xs text-[var(--text-primary)] border border-[var(--border-color)]" />
-                  <button onClick={() => copiarLink(linkGenerado)} className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">Copiar</button>
+            {credencialesCreadas ? (
+              // Mostrar credenciales y opciones de envio
+              <div className="space-y-4">
+                <div className="p-4 bg-[var(--bg-primary)] rounded-lg border border-[var(--border-color)]">
+                  <p className="text-sm text-[var(--text-secondary)] mb-2">Credenciales de acceso:</p>
+                  <div className="space-y-2">
+                    <div>
+                      <span className="text-xs text-[var(--text-tertiary)]">Email:</span>
+                      <p className="text-[var(--text-primary)] font-mono">{credencialesCreadas.email}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-[var(--text-tertiary)]">Contrasena:</span>
+                      <p className="text-emerald-400 font-mono font-bold">{credencialesCreadas.password}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-yellow-500 mt-3">* El usuario debera cambiar su contrasena en el primer inicio de sesion</p>
+                </div>
+
+                <p className="text-sm text-[var(--text-secondary)]">Enviar credenciales al usuario:</p>
+
+                <div className="grid grid-cols-1 gap-2">
+                  <button
+                    onClick={() => enviarCredenciales('email')}
+                    disabled={enviandoCredenciales}
+                    className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    📧 Enviar por Email
+                  </button>
+
+                  {credencialesCreadas.telefono && (
+                    <button
+                      onClick={() => enviarCredenciales('whatsapp')}
+                      disabled={enviandoCredenciales}
+                      className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      💬 Enviar por WhatsApp
+                    </button>
+                  )}
+
+                  <button
+                    onClick={copiarCredenciales}
+                    className="w-full px-4 py-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-primary)] flex items-center justify-center gap-2"
+                  >
+                    📋 Copiar Credenciales
+                  </button>
+                </div>
+
+                <button
+                  onClick={cerrarModal}
+                  className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 mt-4"
+                >
+                  Cerrar
+                </button>
+              </div>
+            ) : (
+              // Formulario de creacion
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm text-[var(--text-secondary)] mb-1">Nombre completo *</label>
+                  <input
+                    type="text"
+                    value={nuevoUsuario.nombre}
+                    onChange={(e) => setNuevoUsuario({ ...nuevoUsuario, nombre: e.target.value })}
+                    placeholder="Juan Perez"
+                    className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-[var(--text-secondary)] mb-1">Email *</label>
+                  <input
+                    type="email"
+                    value={nuevoUsuario.email}
+                    onChange={(e) => setNuevoUsuario({ ...nuevoUsuario, email: e.target.value })}
+                    placeholder="juan@empresa.com"
+                    className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-[var(--text-secondary)] mb-1">Telefono (para WhatsApp)</label>
+                  <input
+                    type="tel"
+                    value={nuevoUsuario.telefono}
+                    onChange={(e) => setNuevoUsuario({ ...nuevoUsuario, telefono: e.target.value })}
+                    placeholder="593999999999"
+                    className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
+                  />
+                  <p className="text-xs text-[var(--text-tertiary)] mt-1">Codigo de pais sin + (ej: 593 para Ecuador)</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-[var(--text-secondary)] mb-1">Rol</label>
+                  <select
+                    value={nuevoUsuario.rol_id}
+                    onChange={(e) => setNuevoUsuario({ ...nuevoUsuario, rol_id: e.target.value })}
+                    className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
+                  >
+                    <option value="">Seleccionar rol...</option>
+                    {roles
+                      .filter(r => r.nivel < user?.nivel) // Solo roles de menor nivel
+                      .map(r => (
+                        <option key={r.id} value={r.id}>{r.nombre}</option>
+                      ))
+                    }
+                  </select>
+                </div>
+
+                <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                  <p className="text-sm text-blue-400">
+                    Se generara una contrasena temporal automaticamente. Podras enviarla por email, WhatsApp o copiarla.
+                  </p>
+                </div>
+
+                <div className="flex gap-3 mt-6">
+                  <button
+                    onClick={cerrarModal}
+                    className="flex-1 px-4 py-2 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-primary)]"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={crearUsuario}
+                    disabled={creando || !nuevoUsuario.nombre || !nuevoUsuario.email}
+                    className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50 hover:bg-emerald-700"
+                  >
+                    {creando ? 'Creando...' : 'Crear Usuario'}
+                  </button>
                 </div>
               </div>
             )}
-
-            <div className="space-y-4">
-              {isSuperAdmin && (
-                <div>
-                  <label className="block text-sm text-[var(--text-secondary)] mb-1">Tipo de usuario</label>
-                  <select
-                    value={newInvite.tipo}
-                    onChange={(e) => setNewInvite({ ...newInvite, tipo: e.target.value })}
-                    className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
-                  >
-                    <option value="cliente">🏢 Nuevo Cliente (cuenta independiente)</option>
-                    <option value="sub_usuario">👤 Sub-usuario (dentro de mi cuenta)</option>
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm text-[var(--text-secondary)] mb-1">Nombre completo *</label>
-                <input
-                  type="text"
-                  value={newInvite.nombre}
-                  onChange={(e) => setNewInvite({ ...newInvite, nombre: e.target.value })}
-                  placeholder="Juan Perez"
-                  className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm text-[var(--text-secondary)] mb-1">Email *</label>
-                <input
-                  type="email"
-                  value={newInvite.email}
-                  onChange={(e) => setNewInvite({ ...newInvite, email: e.target.value })}
-                  placeholder="juan@empresa.com"
-                  className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
-                />
-              </div>
-
-              {newInvite.tipo === 'cliente' && isSuperAdmin && planes.length > 0 && (
-                <div>
-                  <label className="block text-sm text-[var(--text-secondary)] mb-1">Plan</label>
-                  <select
-                    value={newInvite.plan_id}
-                    onChange={(e) => setNewInvite({ ...newInvite, plan_id: e.target.value })}
-                    className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
-                  >
-                    <option value="">Seleccionar plan...</option>
-                    {planes.map(p => (
-                      <option key={p.id} value={p.id}>{p.nombre} - {p.descripcion}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {newInvite.tipo === 'sub_usuario' && (
-                <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-                  <p className="text-sm text-purple-400 mb-2">Limites para este sub-usuario:</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-[var(--text-tertiary)] mb-1">Contactos</label>
-                      <input
-                        type="number"
-                        value={newInvite.limite_contactos}
-                        onChange={(e) => setNewInvite({ ...newInvite, limite_contactos: Number(e.target.value) })}
-                        className="w-full px-2 py-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-[var(--text-tertiary)] mb-1">Mensajes/mes</label>
-                      <input
-                        type="number"
-                        value={newInvite.limite_mensajes}
-                        onChange={(e) => setNewInvite({ ...newInvite, limite_mensajes: Number(e.target.value) })}
-                        className="w-full px-2 py-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] text-sm"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setShowInvitar(false)}
-                className="flex-1 px-4 py-2 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-primary)]"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={enviarInvitacion}
-                disabled={invitando || !newInvite.nombre || !newInvite.email}
-                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50 hover:bg-emerald-700"
-              >
-                {invitando ? 'Enviando...' : '📧 Enviar Invitacion'}
-              </button>
-            </div>
           </div>
         </div>
       )}

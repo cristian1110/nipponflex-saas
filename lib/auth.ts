@@ -47,7 +47,7 @@ export function verifyToken(token: string): JWTPayload | null {
   }
 }
 
-export async function getCurrentUser(): Promise<Usuario | null> {
+export async function getCurrentUser(): Promise<(Usuario & { debe_cambiar_password?: boolean }) | null> {
   try {
     const cookieStore = await cookies()
     const token = cookieStore.get('auth_token')?.value
@@ -58,12 +58,12 @@ export async function getCurrentUser(): Promise<Usuario | null> {
     if (!payload) return null
 
     const user = await queryOne<any>(
-      `SELECT u.id, u.email, u.nombre, u.apellido, u.telefono, u.cliente_id, u.estado,
+      `SELECT u.id, u.email, u.nombre, u.apellido, u.telefono, u.cliente_id, u.estado, u.debe_cambiar_password,
               r.nombre as rol, r.nivel,
               c.nombre_empresa as cliente_nombre
-       FROM usuarios u 
+       FROM usuarios u
        LEFT JOIN roles r ON u.rol_id = r.id
-       LEFT JOIN clientes c ON u.cliente_id = c.id 
+       LEFT JOIN clientes c ON u.cliente_id = c.id
        WHERE u.id = $1 AND u.estado = 'activo'`,
       [payload.userId]
     )
@@ -74,14 +74,14 @@ export async function getCurrentUser(): Promise<Usuario | null> {
   }
 }
 
-export async function login(email: string, password: string): Promise<{ user: Usuario; token: string } | null> {
+export async function login(email: string, password: string): Promise<{ user: Usuario & { debe_cambiar_password?: boolean }; token: string } | null> {
   const user = await queryOne<any>(
-    `SELECT u.id, u.email, u.password_hash, u.nombre, u.apellido, u.telefono, u.cliente_id, u.estado,
+    `SELECT u.id, u.email, u.password_hash, u.nombre, u.apellido, u.telefono, u.cliente_id, u.estado, u.debe_cambiar_password,
             r.nombre as rol, r.nivel,
             c.nombre_empresa as cliente_nombre
-     FROM usuarios u 
+     FROM usuarios u
      LEFT JOIN roles r ON u.rol_id = r.id
-     LEFT JOIN clientes c ON u.cliente_id = c.id 
+     LEFT JOIN clientes c ON u.cliente_id = c.id
      WHERE u.email = $1 AND u.estado = 'activo'`,
     [email.toLowerCase()]
   )

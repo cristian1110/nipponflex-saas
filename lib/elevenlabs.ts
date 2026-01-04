@@ -162,13 +162,20 @@ export async function obtenerVoces(): Promise<any[] | null> {
   }
 }
 
-// Clonar voz desde muestras de audio
-export async function clonarVoz(
-  nombre: string,
-  descripcion: string,
-  muestrasAudio: Buffer[],
+interface ClonarVozParams {
+  nombre: string
+  descripcion?: string
+  audioBuffer: Buffer
   clienteId?: number
-): Promise<string | null> {
+}
+
+interface ClonarVozResponse {
+  voice_id: string
+  nombre: string
+}
+
+// Clonar voz desde muestra de audio
+export async function clonarVoz(params: ClonarVozParams): Promise<ClonarVozResponse | null> {
   const apiKey = process.env.ELEVENLABS_API_KEY
 
   if (!apiKey) {
@@ -176,16 +183,16 @@ export async function clonarVoz(
     return null
   }
 
+  const { nombre, descripcion = '', audioBuffer, clienteId } = params
+
   try {
     const formData = new FormData()
     formData.append('name', nombre)
     formData.append('description', descripcion)
 
-    // Agregar muestras de audio
-    muestrasAudio.forEach((muestra, index) => {
-      const blob = new Blob([muestra], { type: 'audio/mpeg' })
-      formData.append('files', blob, `sample_${index}.mp3`)
-    })
+    // Agregar muestra de audio
+    const blob = new Blob([audioBuffer], { type: 'audio/mpeg' })
+    formData.append('files', blob, 'sample.mp3')
 
     const response = await fetch(`${ELEVENLABS_API_URL}/voices/add`, {
       method: 'POST',
@@ -216,7 +223,10 @@ export async function clonarVoz(
       })
     }
 
-    return voiceId
+    return {
+      voice_id: voiceId,
+      nombre: nombre
+    }
   } catch (error) {
     console.error('Error clonando voz:', error)
     return null

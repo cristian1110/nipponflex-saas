@@ -369,35 +369,64 @@ export async function POST(request: NextRequest) {
     let enviadoComoAudio = false
 
     if (agente.responder_con_audio && agente.voice_id && process.env.ELEVENLABS_API_KEY) {
-      // Mostrar "grabando audio..." al usuario
-      await enviarPresencia(
-        instancia.evolution_instance,
-        instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
-        numero,
-        'recording'
+      // Verificar limite de caracteres ElevenLabs del plan
+      const limiteInfo = await queryOne(
+        `SELECT c.uso_elevenlabs_caracteres, p.max_caracteres_elevenlabs,
+                c.tipo_cliente
+         FROM clientes c
+         LEFT JOIN planes p ON c.plan_id = p.id
+         WHERE c.id = $1`,
+        [clienteId]
       )
 
-      // Generar audio con ElevenLabs
-      console.log('Generando audio con ElevenLabs para:', numero)
-      const audioGenerado = await generarAudio({
-        texto: respuestaIA.content,
-        voiceId: agente.voice_id,
-        clienteId: clienteId,
-      })
+      const limite = limiteInfo?.max_caracteres_elevenlabs || 10000
+      const usado = limiteInfo?.uso_elevenlabs_caracteres || 0
+      const esSuperAdmin = limiteInfo?.tipo_cliente === 'superadmin'
+      const caracteresRespuesta = respuestaIA.content.length
 
-      if (audioGenerado) {
-        // Enviar como nota de voz
-        const audioBase64 = audioGenerado.audioBuffer.toString('base64')
-        resultado = await enviarAudioWhatsApp({
-          instancia: instancia.evolution_instance,
-          apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+      // Super admin no tiene limite
+      if (!esSuperAdmin && (usado + caracteresRespuesta) > limite) {
+        console.log(`Limite ElevenLabs alcanzado: ${usado}/${limite} caracteres`)
+        // Fallback a texto si se alcanzo el limite
+      } else {
+        // Mostrar "grabando audio..." al usuario
+        await enviarPresencia(
+          instancia.evolution_instance,
+          instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
           numero,
-          mediaBase64: audioBase64,
-          mimetype: audioGenerado.contentType, // audio/mpeg
-          delayMs: 300,
+          'recording'
+        )
+
+        // Generar audio con ElevenLabs
+        console.log('Generando audio con ElevenLabs para:', numero)
+        const audioGenerado = await generarAudio({
+          texto: respuestaIA.content,
+          voiceId: agente.voice_id,
+          clienteId: clienteId,
         })
-        enviadoComoAudio = resultado.success
-        console.log(`Audio generado: ${audioGenerado.caracteres} caracteres, costo: $${audioGenerado.costoUsd.toFixed(4)}`)
+
+        if (audioGenerado) {
+          // Enviar como nota de voz
+          const audioBase64 = audioGenerado.audioBuffer.toString('base64')
+          resultado = await enviarAudioWhatsApp({
+            instancia: instancia.evolution_instance,
+            apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+            numero,
+            mediaBase64: audioBase64,
+            mimetype: audioGenerado.contentType, // audio/mpeg
+            delayMs: 300,
+          })
+          enviadoComoAudio = resultado.success
+          console.log(`Audio generado: ${audioGenerado.caracteres} caracteres, costo: $${audioGenerado.costoUsd.toFixed(4)}`)
+
+          // Actualizar uso de caracteres ElevenLabs
+          if (enviadoComoAudio) {
+            await execute(
+              `UPDATE clientes SET uso_elevenlabs_caracteres = COALESCE(uso_elevenlabs_caracteres, 0) + $2 WHERE id = $1`,
+              [clienteId, audioGenerado.caracteres]
+            )
+          }
+        }
       }
     }
 

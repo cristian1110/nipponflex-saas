@@ -710,8 +710,74 @@ export default function AgentesPage() {
                           ))}
                         </select>
                         <p className="text-xs text-[var(--text-tertiary)] mt-2">
-                          Usa ElevenLabs para generar audio con voz natural. Costo aprox: $0.00003/carácter
+                          Usa ElevenLabs para generar audio con voz natural. Costo aprox: $0.00003/caracter
                         </p>
+
+                        {/* Seccion de clonacion de voz */}
+                        <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
+                          <h5 className="font-medium text-[var(--text-primary)] mb-2">Clonar tu propia voz</h5>
+                          <p className="text-xs text-[var(--text-secondary)] mb-3">
+                            Sube un audio de tu voz (minimo 30 segundos) para crear una voz personalizada
+                          </p>
+                          <div className="space-y-3">
+                            <input
+                              type="text"
+                              placeholder="Nombre de la voz (ej: Mi Voz)"
+                              className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm"
+                              id="nombreVozClonada"
+                            />
+                            <input
+                              type="file"
+                              accept="audio/*"
+                              className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:bg-emerald-600 file:text-white file:text-sm"
+                              id="archivoVozClonada"
+                            />
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const nombreInput = document.getElementById('nombreVozClonada') as HTMLInputElement
+                                const archivoInput = document.getElementById('archivoVozClonada') as HTMLInputElement
+                                const nombre = nombreInput?.value
+                                const archivo = archivoInput?.files?.[0]
+
+                                if (!nombre || !archivo) {
+                                  alert('Ingresa un nombre y selecciona un archivo de audio')
+                                  return
+                                }
+
+                                const formData = new FormData()
+                                formData.append('nombre', nombre)
+                                formData.append('archivo', archivo)
+
+                                try {
+                                  const res = await fetch('/api/elevenlabs/clonar-voz', {
+                                    method: 'POST',
+                                    body: formData
+                                  })
+                                  const data = await res.json()
+
+                                  if (data.success) {
+                                    alert('Voz clonada exitosamente! Ahora puedes seleccionarla en la lista.')
+                                    setSelectedAgente({ ...selectedAgente, voice_id: data.voice_id })
+                                    // Recargar voces
+                                    const vocesRes = await fetch('/api/elevenlabs/voces')
+                                    if (vocesRes.ok) {
+                                      const vocesData = await vocesRes.json()
+                                      setVoces(vocesData.voces || [])
+                                    }
+                                  } else {
+                                    alert('Error: ' + (data.error || 'No se pudo clonar la voz'))
+                                  }
+                                } catch (e) {
+                                  alert('Error de conexion')
+                                }
+                              }}
+                              className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
+                            >
+                              Clonar Voz
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
