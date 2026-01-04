@@ -37,8 +37,15 @@ export default function ConversacionesPage() {
   const [showNewChat, setShowNewChat] = useState(false)
   const [newChatNumber, setNewChatNumber] = useState('')
   const [newChatName, setNewChatName] = useState('')
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [filePreview, setFilePreview] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const selectedConvRef = useRef<Conversacion | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Emojis comunes
+  const emojis = ['😀', '😂', '🥰', '😍', '🤔', '👍', '👎', '❤️', '🔥', '✅', '🎉', '🙏', '💯', '⭐', '📷', '🎵', '📍', '💬', '📞', '✨']
 
   // Mantener referencia actualizada de selectedConv
   useEffect(() => {
@@ -147,43 +154,104 @@ export default function ConversacionesPage() {
     await loadMensajes(conv.numero)
   }
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validar tamaño (max 16MB)
+    if (file.size > 16 * 1024 * 1024) {
+      alert('El archivo es muy grande. Maximo 16MB')
+      return
+    }
+
+    setSelectedFile(file)
+
+    // Crear preview si es imagen
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader()
+      reader.onloadend = () => setFilePreview(reader.result as string)
+      reader.readAsDataURL(file)
+    } else if (file.type.startsWith('video/')) {
+      setFilePreview('video')
+    } else if (file.type.startsWith('audio/')) {
+      setFilePreview('audio')
+    } else {
+      setFilePreview('document')
+    }
+  }
+
+  const cancelarArchivo = () => {
+    setSelectedFile(null)
+    setFilePreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const insertarEmoji = (emoji: string) => {
+    setNuevoMensaje(prev => prev + emoji)
+    setShowEmojiPicker(false)
+  }
+
   const enviarMensaje = async () => {
-    if (!nuevoMensaje.trim() || !selectedConv) return
-    
+    if ((!nuevoMensaje.trim() && !selectedFile) || !selectedConv) return
+
     const mensajeTexto = nuevoMensaje
+    const archivoEnviar = selectedFile
     setNuevoMensaje('')
+    setSelectedFile(null)
+    setFilePreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
     setEnviando(true)
-    
+
     // Agregar mensaje optimistamente
+    const textoOptimista = archivoEnviar
+      ? (archivoEnviar.type.startsWith('image/') ? '[Enviando imagen...]' : archivoEnviar.type.startsWith('audio/') ? '[Enviando audio...]' : archivoEnviar.type.startsWith('video/') ? '[Enviando video...]' : `[Enviando ${archivoEnviar.name}...]`) + (mensajeTexto ? ` ${mensajeTexto}` : '')
+      : mensajeTexto
+
     const nuevoMsg: Mensaje = {
       id: `temp_${Date.now()}`,
-      texto: mensajeTexto,
+      texto: textoOptimista,
       rol: 'assistant',
       fecha: new Date().toISOString()
     }
     setMensajes(prev => [...prev, nuevoMsg])
-    
+
     try {
-      const res = await fetch('/api/mensajes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          numero_whatsapp: selectedConv.numero,
-          mensaje: mensajeTexto
+      let res
+
+      if (archivoEnviar) {
+        // Enviar con FormData para archivos
+        const formData = new FormData()
+        formData.append('numero_whatsapp', selectedConv.numero)
+        formData.append('mensaje', mensajeTexto)
+        formData.append('file', archivoEnviar)
+
+        res = await fetch('/api/mensajes', {
+          method: 'POST',
+          body: formData
         })
-      })
-      
+      } else {
+        // Enviar texto normal
+        res = await fetch('/api/mensajes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            numero_whatsapp: selectedConv.numero,
+            mensaje: mensajeTexto
+          })
+        })
+      }
+
       if (res.ok) {
         // Recargar mensajes para obtener el ID real
         await loadMensajes(selectedConv.numero)
-        
+
         if (selectedConv.id.startsWith('new_')) {
           await loadConversaciones()
         }
       } else {
         const data = await res.json()
         alert('Error al enviar: ' + (data.error || 'Intenta de nuevo'))
-        // Remover mensaje optimista si falló
+        // Remover mensaje optimista si fallo
         setMensajes(prev => prev.filter(m => m.id !== nuevoMsg.id))
         setNuevoMensaje(mensajeTexto)
       }
@@ -371,9 +439,75 @@ export default function ConversacionesPage() {
                 <div ref={messagesEndRef} />
               </div>
 
+              {/* Preview de archivo seleccionado */}
+              {selectedFile && (
+                <div className="px-4 py-2 border-t border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                  <div className="flex items-center gap-3">
+                    {filePreview && filePreview.startsWith('data:image') ? (
+                      <img src={filePreview} alt="Preview" className="w-16 h-16 object-cover rounded-lg" />
+                    ) : filePreview === 'video' ? (
+                      <div className="w-16 h-16 bg-blue-500/20 rounded-lg flex items-center justify-center text-2xl">🎬</div>
+                    ) : filePreview === 'audio' ? (
+                      <div className="w-16 h-16 bg-purple-500/20 rounded-lg flex items-center justify-center text-2xl">🎵</div>
+                    ) : (
+                      <div className="w-16 h-16 bg-gray-500/20 rounded-lg flex items-center justify-center text-2xl">📄</div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-[var(--text-primary)] truncate">{selectedFile.name}</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                    </div>
+                    <button onClick={cancelarArchivo} className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg">✕</button>
+                  </div>
+                </div>
+              )}
+
               {/* Input de mensaje */}
               <div className="p-4 border-t border-[var(--border-color)]">
                 <div className="flex items-center gap-2">
+                  {/* Boton adjuntar */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={enviando}
+                    className="p-2 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg disabled:opacity-50"
+                    title="Adjuntar archivo"
+                  >
+                    📎
+                  </button>
+
+                  {/* Boton emoji */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                      disabled={enviando}
+                      className="p-2 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg disabled:opacity-50"
+                      title="Emojis"
+                    >
+                      😀
+                    </button>
+                    {showEmojiPicker && (
+                      <div className="absolute bottom-12 left-0 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-2 shadow-lg z-10">
+                        <div className="grid grid-cols-5 gap-1">
+                          {emojis.map(emoji => (
+                            <button
+                              key={emoji}
+                              onClick={() => insertarEmoji(emoji)}
+                              className="p-2 hover:bg-[var(--bg-tertiary)] rounded text-xl"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <input
                     type="text"
                     placeholder="Escribe un mensaje..."
@@ -383,9 +517,9 @@ export default function ConversacionesPage() {
                     disabled={enviando}
                     className="flex-1 px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-full text-sm text-[var(--text-primary)] disabled:opacity-50"
                   />
-                  <button 
+                  <button
                     onClick={enviarMensaje}
-                    disabled={enviando || !nuevoMensaje.trim()}
+                    disabled={enviando || (!nuevoMensaje.trim() && !selectedFile)}
                     className="p-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50"
                   >
                     {enviando ? '...' : '➤'}
