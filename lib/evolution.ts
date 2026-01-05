@@ -288,6 +288,309 @@ export async function enviarMediaWhatsApp(options: SendUnifiedMediaOptions): Pro
   }
 }
 
+// ============================================
+// GESTIÓN DE INSTANCIAS
+// ============================================
+
+interface InstanceStatus {
+  name: string
+  connectionStatus: string
+  disconnectionReasonCode?: number
+  disconnectionObject?: string
+  number?: string
+  ownerJid?: string
+}
+
+/**
+ * Obtiene el estado de una instancia
+ */
+export async function getInstanceStatus(instancia: string, apiKey: string): Promise<InstanceStatus | null> {
+  try {
+    const response = await fetch(`${EVOLUTION_URL}/instance/fetchInstances?instanceName=${instancia}`, {
+      headers: { 'apikey': apiKey }
+    })
+
+    if (!response.ok) return null
+
+    const data = await response.json()
+    const instance = Array.isArray(data) ? data[0] : data
+
+    return {
+      name: instance?.instance?.instanceName || instancia,
+      connectionStatus: instance?.instance?.state || instance?.connectionStatus || 'unknown',
+      disconnectionReasonCode: instance?.disconnectionReasonCode,
+      disconnectionObject: instance?.disconnectionObject,
+      number: instance?.number,
+      ownerJid: instance?.ownerJid
+    }
+  } catch (error) {
+    console.error('Error obteniendo estado de instancia:', error)
+    return null
+  }
+}
+
+/**
+ * Hace logout de una instancia para detener la generación de QR codes
+ * Esto es necesario cuando se detecta una desconexión desde el dispositivo
+ */
+export async function logoutInstance(instancia: string, apiKey: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`[Evolution] Ejecutando logout de instancia: ${instancia}`)
+
+    const response = await fetch(`${EVOLUTION_URL}/instance/logout/${instancia}`, {
+      method: 'DELETE',
+      headers: { 'apikey': apiKey }
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[Evolution] Error en logout: ${response.status} - ${errorText}`)
+      return { success: false, error: `Error ${response.status}: ${errorText}` }
+    }
+
+    const data = await response.json()
+    console.log(`[Evolution] Logout exitoso para instancia: ${instancia}`, data)
+    return { success: true }
+  } catch (error) {
+    console.error('[Evolution] Error en logout:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
+/**
+ * Reinicia una instancia (útil para reconectar después de un logout)
+ */
+export async function restartInstance(instancia: string, apiKey: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`[Evolution] Reiniciando instancia: ${instancia}`)
+
+    const response = await fetch(`${EVOLUTION_URL}/instance/restart/${instancia}`, {
+      method: 'PUT',
+      headers: { 'apikey': apiKey }
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      return { success: false, error: `Error ${response.status}: ${errorText}` }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error('[Evolution] Error reiniciando instancia:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
+/**
+ * Códigos de desconexión de WhatsApp/Evolution API
+ * https://github.com/EvolutionAPI/evolution-api
+ */
+export const DISCONNECTION_CODES = {
+  // Desconexión intencional desde dispositivo
+  LOGGED_OUT: 401,           // Usuario cerró sesión desde el celular
+  DEVICE_REMOVED: 401,       // Dispositivo eliminado desde "Dispositivos vinculados"
+
+  // Desconexión por conflicto/reemplazo
+  CONFLICT: 440,             // Otra sesión tomó el control
+  REPLACED: 440,             // Sesión reemplazada
+
+  // Desconexión por problemas de conexión (pueden requerir reconexión)
+  CONNECTION_LOST: 428,      // Conexión perdida
+  TIMEOUT: 408,              // Timeout de conexión
+  RESTART_REQUIRED: 515,     // Requiere reinicio
+
+  // Estados de conexión
+  STATE_CLOSE: 'close',
+  STATE_CONNECTING: 'connecting',
+  STATE_OPEN: 'open',
+}
+
+/**
+ * Detecta si la desconexión fue desde el dispositivo del usuario
+ * (cerró sesión en "Dispositivos vinculados" del celular)
+ */
+export function isDeviceRemovedDisconnection(disconnectionCode?: number, disconnectionObject?: string): boolean {
+  // Códigos que indican desconexión desde el dispositivo
+  const deviceRemovedCodes = [401, 440]
+  if (disconnectionCode && deviceRemovedCodes.includes(disconnectionCode)) {
+    return true
+  }
+
+  // Buscar indicadores en el objeto de desconexión
+  if (disconnectionObject) {
+    try {
+      const obj = typeof disconnectionObject === 'string' ? JSON.parse(disconnectionObject) : disconnectionObject
+
+      // Patrones que indican desconexión desde dispositivo
+      if (obj?.error?.data?.attrs?.type === 'device_removed') return true
+      if (obj?.error?.data?.tag === 'conflict') return true
+      if (obj?.error?.data?.tag === 'stream:error') return true
+      if (obj?.reason === 'logout') return true
+      if (obj?.reason === 'replaced') return true
+
+      // Baileys specific
+      if (obj?.output?.error?.output?.statusCode === 401) return true
+      if (obj?.output?.error?.output?.payload?.error === 'Unauthorized') return true
+    } catch {
+      // Si hay error parseando, verificar como string
+      const objStr = String(disconnectionObject).toLowerCase()
+      if (objStr.includes('device_removed')) return true
+      if (objStr.includes('conflict')) return true
+      if (objStr.includes('logout')) return true
+      if (objStr.includes('replaced')) return true
+      if (objStr.includes('unauthorized')) return true
+      if (objStr.includes('stream:error')) return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * Detecta si la desconexión requiere reconexión manual (QR)
+ * vs reconexión automática posible
+ */
+export function requiresManualReconnection(disconnectionCode?: number, disconnectionObject?: string): boolean {
+  // Estos códigos SIEMPRE requieren escanear QR de nuevo
+  const manualReconnectCodes = [401, 440]
+  if (disconnectionCode && manualReconnectCodes.includes(disconnectionCode)) {
+    return true
+  }
+
+  // Si fue device_removed, siempre requiere QR
+  if (isDeviceRemovedDisconnection(disconnectionCode, disconnectionObject)) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Detecta si es una desconexión temporal que puede recuperarse sola
+ */
+export function isTemporaryDisconnection(disconnectionCode?: number): boolean {
+  // Estos códigos pueden recuperarse automáticamente
+  const temporaryCodes = [408, 428]
+  return disconnectionCode !== undefined && temporaryCodes.includes(disconnectionCode)
+}
+
+/**
+ * Configura el webhook de una instancia para recibir eventos
+ * Esto es CRÍTICO para detectar desconexiones desde el dispositivo
+ */
+export async function configureWebhook(
+  instancia: string,
+  apiKey: string,
+  webhookUrl: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`[Evolution] Configurando webhook para ${instancia}: ${webhookUrl}`)
+
+    const response = await fetch(`${EVOLUTION_URL}/webhook/set/${instancia}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey
+      },
+      body: JSON.stringify({
+        url: webhookUrl,
+        webhook_by_events: false, // Recibir todos los eventos en una URL
+        webhook_base64: true,     // Recibir media en base64
+        events: [
+          'APPLICATION_STARTUP',
+          'QRCODE_UPDATED',
+          'MESSAGES_SET',
+          'MESSAGES_UPSERT',
+          'MESSAGES_UPDATE',
+          'MESSAGES_DELETE',
+          'SEND_MESSAGE',
+          'CONTACTS_SET',
+          'CONTACTS_UPSERT',
+          'CONTACTS_UPDATE',
+          'PRESENCE_UPDATE',
+          'CHATS_SET',
+          'CHATS_UPSERT',
+          'CHATS_UPDATE',
+          'CHATS_DELETE',
+          'GROUPS_UPSERT',
+          'GROUP_UPDATE',
+          'GROUP_PARTICIPANTS_UPDATE',
+          'CONNECTION_UPDATE', // CRÍTICO: detectar desconexiones
+          'CALL',
+          'LABELS_EDIT',
+          'LABELS_ASSOCIATION'
+        ]
+      })
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[Evolution] Error configurando webhook: ${response.status} - ${errorText}`)
+      return { success: false, error: `Error ${response.status}: ${errorText}` }
+    }
+
+    const data = await response.json()
+    console.log(`[Evolution] Webhook configurado exitosamente:`, data)
+    return { success: true }
+  } catch (error) {
+    console.error('[Evolution] Error configurando webhook:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
+/**
+ * Verifica si el webhook está configurado correctamente
+ */
+export async function getWebhookConfig(
+  instancia: string,
+  apiKey: string
+): Promise<{ configured: boolean; url?: string; events?: string[] }> {
+  try {
+    const response = await fetch(`${EVOLUTION_URL}/webhook/find/${instancia}`, {
+      headers: { 'apikey': apiKey }
+    })
+
+    if (!response.ok) {
+      return { configured: false }
+    }
+
+    const data = await response.json()
+    return {
+      configured: !!data?.url,
+      url: data?.url,
+      events: data?.events
+    }
+  } catch {
+    return { configured: false }
+  }
+}
+
+/**
+ * Elimina/deshabilita el webhook de una instancia
+ */
+export async function deleteWebhook(
+  instancia: string,
+  apiKey: string
+): Promise<{ success: boolean }> {
+  try {
+    const response = await fetch(`${EVOLUTION_URL}/webhook/set/${instancia}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey
+      },
+      body: JSON.stringify({
+        url: '',
+        events: []
+      })
+    })
+
+    return { success: response.ok }
+  } catch {
+    return { success: false }
+  }
+}
+
 export async function enviarDocumentoWhatsApp(options: SendMediaOptions): Promise<SendMessageResult> {
   const { instancia, apiKey, numero, mediaUrl, mediaBase64, mimetype, fileName, caption, delayMs = 0 } = options
 

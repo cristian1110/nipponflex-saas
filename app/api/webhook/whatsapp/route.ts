@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne, execute } from '@/lib/db'
 import { generarRespuestaIA, mapearModelo, transcribirAudio, analizarImagen, analizarSentimiento } from '@/lib/ai'
-import { enviarMensajeWhatsApp, enviarPresencia, enviarAudioWhatsApp } from '@/lib/evolution'
+import {
+  enviarMensajeWhatsApp,
+  enviarPresencia,
+  enviarAudioWhatsApp,
+  logoutInstance,
+  isDeviceRemovedDisconnection,
+  requiresManualReconnection,
+  isTemporaryDisconnection,
+  DISCONNECTION_CODES
+} from '@/lib/evolution'
 import {
   getPromptCitas,
   extraerCitaDeRespuesta,
@@ -17,18 +26,256 @@ import { buscarContextoRelevante, construirPromptConRAG } from '@/lib/rag'
 import { descargarMedia, base64ToBuffer, esAudioCompatible, esImagenCompatible } from '@/lib/media'
 import { generarAudio } from '@/lib/elevenlabs'
 
+// ============================================
+// RATE LIMITING PARA PREVENIR LOOPS DE QR
+// ============================================
+
+// Cache en memoria para rate limiting de eventos por instancia
+// Formato: { [instanceName]: { count: number, firstEventTime: number, logoutTriggered: boolean } }
+const qrEventCache: Map<string, { count: number; firstEventTime: number; logoutTriggered: boolean }> = new Map()
+
+// Configuración de rate limiting
+const QR_RATE_LIMIT = 10 // Máximo eventos qrcode.updated en el período
+const QR_RATE_WINDOW_MS = 60000 // Período de 1 minuto (60 segundos)
+const CACHE_CLEANUP_INTERVAL_MS = 300000 // Limpiar cache cada 5 minutos
+
+// Limpiar entradas antiguas del cache periódicamente
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, value] of qrEventCache.entries()) {
+    if (now - value.firstEventTime > QR_RATE_WINDOW_MS * 2) {
+      qrEventCache.delete(key)
+    }
+  }
+}, CACHE_CLEANUP_INTERVAL_MS)
+
+/**
+ * Verifica si una instancia está en loop de QR codes
+ * Retorna true si se debe hacer logout
+ */
+function checkQrRateLimit(instanceName: string): { shouldLogout: boolean; eventCount: number } {
+  const now = Date.now()
+  const cached = qrEventCache.get(instanceName)
+
+  if (!cached) {
+    // Primera vez que vemos esta instancia
+    qrEventCache.set(instanceName, { count: 1, firstEventTime: now, logoutTriggered: false })
+    return { shouldLogout: false, eventCount: 1 }
+  }
+
+  // Si ya se hizo logout, no hacer más
+  if (cached.logoutTriggered) {
+    return { shouldLogout: false, eventCount: cached.count }
+  }
+
+  // Si el período expiró, reiniciar contador
+  if (now - cached.firstEventTime > QR_RATE_WINDOW_MS) {
+    qrEventCache.set(instanceName, { count: 1, firstEventTime: now, logoutTriggered: false })
+    return { shouldLogout: false, eventCount: 1 }
+  }
+
+  // Incrementar contador
+  cached.count++
+  const shouldLogout = cached.count >= QR_RATE_LIMIT
+
+  if (shouldLogout) {
+    cached.logoutTriggered = true
+  }
+
+  return { shouldLogout, eventCount: cached.count }
+}
+
+/**
+ * Resetea el contador de rate limiting para una instancia
+ */
+function resetQrRateLimit(instanceName: string): void {
+  qrEventCache.delete(instanceName)
+}
+
+// ============================================
+// WEBHOOK PRINCIPAL
+// ============================================
+
 // Webhook para recibir mensajes de Evolution API
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log('Webhook WhatsApp recibido:', body.event)
-
-    // Estructura de Evolution API v2
     const { event, data, instance } = body
 
-    // Solo procesar mensajes entrantes
+    // Log detallado para debugging
+    console.log(`[Webhook] Evento: ${event} | Instancia: ${instance || 'N/A'}`)
+
+    // ============================================
+    // MANEJO DE EVENTOS DE CONEXIÓN
+    // ============================================
+
+    // Evento: connection.update - Detectar desconexiones
+    if (event === 'connection.update') {
+      const state = data?.state || data?.connection
+      const statusReason = data?.statusReason || data?.disconnectionReasonCode
+      const disconnectionObject = data?.disconnectionObject || JSON.stringify(data?.lastDisconnect?.error || {})
+
+      console.log(`[Webhook] connection.update | Instancia: ${instance} | Estado: ${state} | Código: ${statusReason}`)
+
+      // =====================================================
+      // CASO 1: Conexión exitosa
+      // =====================================================
+      if (state === 'open' || state === 'connected') {
+        resetQrRateLimit(instance)
+        console.log(`[Webhook] ✅ Conexión establecida para ${instance}`)
+
+        // Actualizar estado en BD
+        await execute(
+          `UPDATE instancias_whatsapp
+           SET estado = 'conectado',
+               motivo_desconexion = NULL,
+               updated_at = NOW()
+           WHERE evolution_instance = $1`,
+          [instance]
+        )
+
+        return NextResponse.json({ status: 'connected', instance })
+      }
+
+      // =====================================================
+      // CASO 2: Conexión cerrada (state === 'close')
+      // =====================================================
+      if (state === 'close' || state === 'disconnected') {
+        console.log(`[Webhook] ⚠️ CONEXIÓN CERRADA | Instancia: ${instance} | Código: ${statusReason}`)
+        console.log(`[Webhook] Objeto desconexión:`, disconnectionObject)
+
+        // Obtener instancia de la BD
+        const instanciaDB = await queryOne(
+          `SELECT iw.*, c.id as cliente_id
+           FROM instancias_whatsapp iw
+           JOIN clientes c ON iw.cliente_id = c.id
+           WHERE iw.evolution_instance = $1
+           LIMIT 1`,
+          [instance]
+        )
+
+        if (!instanciaDB) {
+          console.log(`[Webhook] Instancia ${instance} no encontrada en BD`)
+          return NextResponse.json({ status: 'instance_not_found' })
+        }
+
+        const apiKey = instanciaDB.evolution_api_key || process.env.EVOLUTION_API_KEY || ''
+        let motivoDesconexion = 'unknown'
+        let shouldLogout = false
+
+        // Determinar el tipo de desconexión
+        if (isDeviceRemovedDisconnection(statusReason, disconnectionObject)) {
+          // Desconexión desde el dispositivo (usuario cerró sesión desde el celular)
+          motivoDesconexion = 'device_removed'
+          shouldLogout = true
+          console.log(`[Webhook] 📱 Desconexión detectada: Usuario cerró sesión desde el celular`)
+        } else if (requiresManualReconnection(statusReason, disconnectionObject)) {
+          // Requiere reconexión manual (escanear QR de nuevo)
+          motivoDesconexion = 'manual_reconnect_required'
+          shouldLogout = true
+          console.log(`[Webhook] 🔄 Requiere reconexión manual con QR`)
+        } else if (isTemporaryDisconnection(statusReason)) {
+          // Desconexión temporal (puede recuperarse sola)
+          motivoDesconexion = 'temporary'
+          shouldLogout = false
+          console.log(`[Webhook] ⏳ Desconexión temporal (código ${statusReason}), esperando reconexión automática`)
+        } else {
+          // Desconexión desconocida - ser conservador y hacer logout
+          motivoDesconexion = `code_${statusReason || 'unknown'}`
+          shouldLogout = statusReason === 401 || statusReason === 440 || !statusReason
+          console.log(`[Webhook] ❓ Desconexión con código ${statusReason}, shouldLogout: ${shouldLogout}`)
+        }
+
+        // Hacer logout si es necesario para evitar loop de QR
+        if (shouldLogout) {
+          console.log(`[Webhook] 🛑 Ejecutando logout para evitar loop de QR...`)
+          const logoutResult = await logoutInstance(instance, apiKey)
+          console.log(`[Webhook] Logout: ${logoutResult.success ? 'exitoso' : 'falló - ' + logoutResult.error}`)
+          resetQrRateLimit(instance)
+        }
+
+        // Actualizar estado en BD
+        await execute(
+          `UPDATE instancias_whatsapp
+           SET estado = 'desconectado',
+               motivo_desconexion = $2,
+               updated_at = NOW()
+           WHERE evolution_instance = $1`,
+          [instance, motivoDesconexion]
+        )
+
+        console.log(`[Webhook] ✅ BD actualizada: estado=desconectado, motivo=${motivoDesconexion}`)
+
+        return NextResponse.json({
+          status: 'disconnection_handled',
+          reason: motivoDesconexion,
+          logout: shouldLogout,
+          instance
+        })
+      }
+
+      // =====================================================
+      // CASO 3: Estado de conexión intermedio (connecting)
+      // =====================================================
+      if (state === 'connecting') {
+        console.log(`[Webhook] 🔄 Conectando... ${instance}`)
+        // No hacer nada, esperar a que se conecte o desconecte
+        return NextResponse.json({ status: 'connecting', instance })
+      }
+
+      // Otros estados no manejados
+      console.log(`[Webhook] Estado no manejado: ${state}`)
+      return NextResponse.json({ status: 'connection_update_processed', state })
+    }
+
+    // Evento: qrcode.updated - Aplicar rate limiting
+    if (event === 'qrcode.updated') {
+      const { shouldLogout, eventCount } = checkQrRateLimit(instance)
+
+      console.log(`[Webhook] qrcode.updated #${eventCount}/${QR_RATE_LIMIT} para ${instance}`)
+
+      if (shouldLogout) {
+        console.log(`[Webhook] ⚠️ RATE LIMIT ALCANZADO: ${eventCount} eventos qrcode.updated en menos de ${QR_RATE_WINDOW_MS / 1000}s`)
+        console.log(`[Webhook] Ejecutando logout automático para detener el loop...`)
+
+        // Obtener API key de la instancia
+        const instanciaDB = await queryOne(
+          `SELECT evolution_api_key FROM instancias_whatsapp WHERE evolution_instance = $1`,
+          [instance]
+        )
+
+        const apiKey = instanciaDB?.evolution_api_key || process.env.EVOLUTION_API_KEY || ''
+        const logoutResult = await logoutInstance(instance, apiKey)
+
+        // Actualizar estado en BD
+        await execute(
+          `UPDATE instancias_whatsapp
+           SET estado = 'desconectado',
+               motivo_desconexion = 'qr_loop_detected',
+               updated_at = NOW()
+           WHERE evolution_instance = $1`,
+          [instance]
+        )
+
+        console.log(`[Webhook] ✅ Logout por rate limit: ${logoutResult.success ? 'exitoso' : 'falló'}`)
+
+        return NextResponse.json({
+          status: 'rate_limit_triggered',
+          eventCount,
+          logout: logoutResult.success
+        })
+      }
+
+      return NextResponse.json({ status: 'qr_event_tracked', eventCount })
+    }
+
+    // Evento: messages.upsert - Procesar mensajes
     if (event !== 'messages.upsert' || !data?.message) {
-      return NextResponse.json({ status: 'ignored' })
+      // Otros eventos no manejados
+      if (event) {
+        console.log(`[Webhook] Evento ignorado: ${event}`)
+      }
+      return NextResponse.json({ status: 'ignored', event })
     }
 
     const message = data.message

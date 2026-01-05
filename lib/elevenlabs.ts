@@ -32,6 +32,93 @@ export const VOCES_PREDETERMINADAS = {
   'matilda': { id: 'XrExE9yKIg1WjnnlVkGX', nombre: 'Matilda', idioma: 'en', genero: 'femenino' },
 } as const
 
+// ============================================
+// CONVERSION SIMPLE DE HORAS PARA TTS
+// Solo convierte horas HH:MM a formato hablado
+// ============================================
+
+/**
+ * Convierte horas en formato 24h (HH:MM) a formato hablado en espanol
+ * Ej: "a las 13:40" -> "a la una y cuarenta de la tarde"
+ * Maneja correctamente cuando ya hay "a las" o "a la" antes del numero
+ */
+function convertirHorasEnTexto(texto: string): string {
+  // Numeros del 1-12 para las horas (sin tildes para evitar problemas)
+  const numeros = ['', 'una', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez', 'once', 'doce']
+
+  // Regex que captura el contexto antes de la hora: "a las", "a la", "las", "la", o nada
+  // Grupo 1: prefijo opcional (a las, a la, las, la)
+  // Grupo 2: hora
+  // Grupo 3: minutos
+  return texto.replace(/(a las |a la |las |la )?(\d{1,2}):(\d{2})\b/gi, (match, prefijo, h, m) => {
+    const hora = parseInt(h)
+    const minutos = parseInt(m)
+
+    // Validar rango
+    if (hora < 0 || hora > 23 || minutos < 0 || minutos > 59) {
+      return match // Devolver sin cambios si no es valido
+    }
+
+    // Casos especiales
+    if (hora === 0 && minutos === 0) {
+      // Si habia prefijo, quitarlo porque "medianoche" no lo necesita
+      return prefijo ? 'medianoche' : 'medianoche'
+    }
+    if (hora === 12 && minutos === 0) {
+      return prefijo ? 'mediodia' : 'mediodia'
+    }
+
+    // Convertir a formato 12 horas
+    let hora12 = hora % 12
+    if (hora12 === 0) hora12 = 12
+
+    // Determinar periodo del dia
+    let periodo = ''
+    if (hora >= 0 && hora < 12) {
+      periodo = 'de la manana'
+    } else if (hora >= 12 && hora < 19) {
+      periodo = 'de la tarde'
+    } else {
+      periodo = 'de la noche'
+    }
+
+    // Articulo correcto segun la hora (la una, las dos, las tres...)
+    const articulo = hora12 === 1 ? 'la' : 'las'
+    const horaTexto = numeros[hora12]
+
+    // Construir minutos
+    let minutosTexto = ''
+    if (minutos === 0) {
+      minutosTexto = ''
+    } else if (minutos === 15) {
+      minutosTexto = ' y cuarto'
+    } else if (minutos === 30) {
+      minutosTexto = ' y media'
+    } else if (minutos === 45) {
+      minutosTexto = ' y tres cuartos'
+    } else {
+      minutosTexto = ` y ${minutos}`
+    }
+
+    // Si habia prefijo "a las" o "a la", reemplazarlo con "a" + articulo correcto
+    // Si habia solo "las" o "la", reemplazarlo con el articulo correcto
+    // Si no habia prefijo, agregar el articulo
+    if (prefijo) {
+      const prefijoLower = prefijo.toLowerCase().trim()
+      if (prefijoLower === 'a las' || prefijoLower === 'a la') {
+        // Habia "a las 13:30" o "a la 13:30" -> "a la una y media"
+        return `a ${articulo} ${horaTexto}${minutosTexto} ${periodo}`
+      } else {
+        // Habia "las 13:30" o "la 13:30" -> "la una y media"
+        return `${articulo} ${horaTexto}${minutosTexto} ${periodo}`
+      }
+    }
+
+    // No habia prefijo, agregar articulo
+    return `${articulo} ${horaTexto}${minutosTexto} ${periodo}`
+  })
+}
+
 interface GenerarAudioParams {
   texto: string
   voiceId?: string
@@ -62,17 +149,23 @@ export async function generarAudio(params: GenerarAudioParams): Promise<GenerarA
   const {
     texto,
     voiceId = VOCES_PREDETERMINADAS.adam.id, // Voz predeterminada
-    modelo = 'eleven_multilingual_v2', // Mejor para español
+    modelo = 'eleven_multilingual_v2', // Mejor para espanol
     clienteId,
-    // Parámetros ajustados para sonido más natural:
-    // - stability más baja = más variación natural en el habla
-    // - similarityBoost alta = más fiel a la voz original
-    // - style más alto = más expresividad emocional
+    // Parametros ajustados para sonido mas natural:
+    // - stability mas baja = mas variacion natural en el habla
+    // - similarityBoost alta = mas fiel a la voz original
+    // - style mas alto = mas expresividad emocional
     stability = 0.35,
     similarityBoost = 0.85,
     style = 0.65,
     useSpeakerBoost = true,
   } = params
+
+  // SOLO convertir horas, nada mas
+  const textoFinal = convertirHorasEnTexto(texto)
+
+  console.log('[ElevenLabs] Texto original:', texto.substring(0, 80))
+  console.log('[ElevenLabs] Texto con horas:', textoFinal.substring(0, 80))
 
   const startTime = Date.now()
 
@@ -85,7 +178,7 @@ export async function generarAudio(params: GenerarAudioParams): Promise<GenerarA
         'Accept': 'audio/mpeg',
       },
       body: JSON.stringify({
-        text: texto,
+        text: textoFinal,
         model_id: modelo,
         voice_settings: {
           stability,
@@ -108,7 +201,7 @@ export async function generarAudio(params: GenerarAudioParams): Promise<GenerarA
     const caracteres = texto.length
     const costoUsd = caracteres * PRECIOS_API.elevenlabs.default
 
-    // Registrar métricas
+    // Registrar metricas
     if (clienteId) {
       await registrarUsoAPI({
         clienteId,
@@ -268,7 +361,7 @@ export async function eliminarVoz(voiceId: string): Promise<boolean> {
   }
 }
 
-// Obtener información de uso/cuota
+// Obtener informacion de uso/cuota
 export async function obtenerCuota(): Promise<any | null> {
   const apiKey = process.env.ELEVENLABS_API_KEY
 
@@ -299,8 +392,8 @@ export async function obtenerCuota(): Promise<any | null> {
 
 // Modelos disponibles
 export const MODELOS_ELEVENLABS = {
-  'eleven_multilingual_v2': 'Multilingual v2 (Mejor para español)',
-  'eleven_monolingual_v1': 'Monolingual v1 (Solo inglés)',
-  'eleven_turbo_v2': 'Turbo v2 (Rápido, menor calidad)',
-  'eleven_turbo_v2_5': 'Turbo v2.5 (Rápido, buena calidad)',
+  'eleven_multilingual_v2': 'Multilingual v2 (Mejor para espanol)',
+  'eleven_monolingual_v1': 'Monolingual v1 (Solo ingles)',
+  'eleven_turbo_v2': 'Turbo v2 (Rapido, menor calidad)',
+  'eleven_turbo_v2_5': 'Turbo v2.5 (Rapido, buena calidad)',
 } as const

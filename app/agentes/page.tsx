@@ -760,7 +760,7 @@ export default function AgentesPage() {
                           <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
                             <p className="text-xs text-blue-400 font-medium mb-2">Consejos para mejor calidad:</p>
                             <ul className="text-xs text-blue-300 space-y-1 list-disc list-inside">
-                              <li><strong>1-3 minutos</strong> de audio es ideal (minimo 30 seg)</li>
+                              <li><strong>5 a 10 minutos</strong> de audio para mejores resultados</li>
                               <li>Habla claro en un <strong>ambiente silencioso</strong></li>
                               <li>Usa un buen microfono o el del celular cerca</li>
                               <li>Varia tu tono: preguntas, afirmaciones, emociones</li>
