@@ -20,9 +20,13 @@ export async function GET() {
         c.telefono,
         c.plan,
         c.estado,
-        c.tipo_cliente,
+        c.limite_usuarios,
+        c.limite_contactos,
+        c.limite_mensajes_mes,
+        c.limite_agentes,
         c.created_at,
         p.nombre as plan_nombre,
+        COALESCE(p.es_personalizado, false) as es_personalizado,
         (SELECT COUNT(*) FROM usuarios WHERE cliente_id = c.id) as total_usuarios,
         (SELECT COUNT(*) FROM instancias_whatsapp WHERE cliente_id = c.id AND estado = 'conectado') as whatsapps_conectados
        FROM clientes c
@@ -46,7 +50,19 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { nombre_empresa, email, telefono, plan_id, tipo_cliente } = body
+    const {
+      nombre_empresa,
+      email,
+      telefono,
+      plan_id,
+      es_personalizado,
+      // Limites personalizados (solo si es plan personalizado)
+      limite_usuarios,
+      limite_contactos,
+      limite_mensajes_mes,
+      limite_agentes,
+      limite_campanas_mes
+    } = body
 
     if (!nombre_empresa || !email) {
       return NextResponse.json({ error: 'Nombre y email son requeridos' }, { status: 400 })
@@ -61,14 +77,24 @@ export async function POST(request: NextRequest) {
     // Obtener límites del plan
     const plan = await queryOne(`SELECT * FROM planes WHERE id = $1`, [plan_id || 1])
 
+    // Si es plan personalizado, usar los límites enviados; si no, usar los del plan
+    const limites = {
+      agentes: es_personalizado ? (limite_agentes || 1) : (plan?.max_agentes || 1),
+      usuarios: es_personalizado ? (limite_usuarios || 3) : (plan?.max_usuarios || 3),
+      contactos: es_personalizado ? (limite_contactos || 500) : (plan?.max_contactos || 500),
+      mensajes_mes: es_personalizado ? (limite_mensajes_mes || 1000) : (plan?.max_mensajes_mes || 1000),
+      campanas_mes: es_personalizado ? (limite_campanas_mes || 0) : (plan?.max_campanas_mes || 0),
+      archivos_kb: plan?.max_archivos_kb || 3
+    }
+
     const nuevoCliente = await queryOne(
       `INSERT INTO clientes (
-        nombre_empresa, email, telefono, plan_id, plan, tipo_cliente, estado,
+        nombre_empresa, email, telefono, plan_id, plan, estado,
         limite_agentes, limite_usuarios, limite_contactos, limite_mensajes_mes,
         limite_archivos, limite_archivos_kb, limite_campanas_mes, limite_automatizaciones,
         max_whatsapp, max_mensajes_mes, max_instancias, max_mensajes_dia, max_contactos, max_campanas_activas
        )
-       VALUES ($1, $2, $3, $4, $5, $6, 'activo', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+       VALUES ($1, $2, $3, $4, $5, 'activo', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
        RETURNING *`,
       [
         nombre_empresa,
@@ -76,20 +102,19 @@ export async function POST(request: NextRequest) {
         telefono || null,
         plan_id || 1,
         plan?.nombre || 'basico',
-        tipo_cliente || 'normal',
-        plan?.max_agentes || 1,
-        plan?.max_usuarios || 3,
-        plan?.max_contactos || 500,
-        plan?.max_mensajes_mes || 1000,
+        limites.agentes,
+        limites.usuarios,
+        limites.contactos,
+        limites.mensajes_mes,
         plan?.max_archivos || 5,
-        plan?.max_archivos_kb || 3,
-        plan?.max_campanas_mes || 0,
+        limites.archivos_kb,
+        limites.campanas_mes,
         plan?.max_automatizaciones || 0,
         plan?.max_whatsapp || 1,
-        plan?.max_mensajes_mes || 2000,
+        limites.mensajes_mes,
         plan?.max_whatsapp || 1,
         plan?.max_mensajes_dia || 100,
-        plan?.max_contactos || 500,
+        limites.contactos,
         plan?.max_campanas_activas || 1
       ]
     )
@@ -110,45 +135,100 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { id, nombre_empresa, email, telefono, plan_id, estado, tipo_cliente } = body
+    const {
+      id,
+      nombre_empresa,
+      email,
+      telefono,
+      plan_id,
+      estado,
+      // Limites personalizados
+      limite_usuarios,
+      limite_contactos,
+      limite_mensajes_mes,
+      limite_agentes,
+      limite_campanas_mes
+    } = body
 
     if (!id) {
       return NextResponse.json({ error: 'ID requerido' }, { status: 400 })
     }
 
-    // Obtener límites del nuevo plan si cambió
-    let planUpdates = ''
-    let planParams: any[] = []
+    // Construir query dinamica
+    let updates: string[] = []
+    let params: any[] = [id]
+    let paramIndex = 2
 
+    if (nombre_empresa !== undefined) {
+      updates.push(`nombre_empresa = $${paramIndex++}`)
+      params.push(nombre_empresa)
+    }
+    if (email !== undefined) {
+      updates.push(`email = $${paramIndex++}`)
+      params.push(email.toLowerCase())
+    }
+    if (telefono !== undefined) {
+      updates.push(`telefono = $${paramIndex++}`)
+      params.push(telefono)
+    }
+    if (estado !== undefined) {
+      updates.push(`estado = $${paramIndex++}`)
+      params.push(estado)
+    }
+
+    // Si cambio el plan
     if (plan_id) {
       const plan = await queryOne(`SELECT * FROM planes WHERE id = $1`, [plan_id])
       if (plan) {
-        planUpdates = `,
-          plan_id = $7, plan = $8,
-          limite_agentes = $9, limite_usuarios = $10, limite_contactos = $11,
-          limite_mensajes_mes = $12, max_whatsapp = $13, max_instancias = $14`
-        planParams = [
-          plan_id, plan.nombre,
-          plan.max_agentes || 1, plan.max_usuarios || 3, plan.max_contactos || 500,
-          plan.max_mensajes_mes || 1000, plan.max_whatsapp || 1, plan.max_whatsapp || 1
-        ]
+        updates.push(`plan_id = $${paramIndex++}`)
+        params.push(plan_id)
+        updates.push(`plan = $${paramIndex++}`)
+        params.push(plan.nombre)
+
+        // Si no es plan personalizado, actualizar limites desde el plan
+        if (!plan.es_personalizado) {
+          updates.push(`limite_agentes = $${paramIndex++}`)
+          params.push(plan.max_agentes || 1)
+          updates.push(`limite_usuarios = $${paramIndex++}`)
+          params.push(plan.max_usuarios || 3)
+          updates.push(`limite_contactos = $${paramIndex++}`)
+          params.push(plan.max_contactos || 500)
+          updates.push(`limite_mensajes_mes = $${paramIndex++}`)
+          params.push(plan.max_mensajes_mes || 1000)
+        }
       }
     }
 
-    const baseParams = [id, nombre_empresa, email?.toLowerCase(), telefono, estado, tipo_cliente]
+    // Limites personalizados (si se envian)
+    if (limite_usuarios !== undefined) {
+      updates.push(`limite_usuarios = $${paramIndex++}`)
+      params.push(limite_usuarios)
+    }
+    if (limite_contactos !== undefined) {
+      updates.push(`limite_contactos = $${paramIndex++}`)
+      params.push(limite_contactos)
+    }
+    if (limite_mensajes_mes !== undefined) {
+      updates.push(`limite_mensajes_mes = $${paramIndex++}`)
+      params.push(limite_mensajes_mes)
+    }
+    if (limite_agentes !== undefined) {
+      updates.push(`limite_agentes = $${paramIndex++}`)
+      params.push(limite_agentes)
+    }
+    if (limite_campanas_mes !== undefined) {
+      updates.push(`limite_campanas_mes = $${paramIndex++}`)
+      params.push(limite_campanas_mes)
+    }
 
-    await execute(
-      `UPDATE clientes SET
-        nombre_empresa = COALESCE($2, nombre_empresa),
-        email = COALESCE($3, email),
-        telefono = COALESCE($4, telefono),
-        estado = COALESCE($5, estado),
-        tipo_cliente = COALESCE($6, tipo_cliente),
-        updated_at = NOW()
-        ${planUpdates}
-       WHERE id = $1`,
-      [...baseParams, ...planParams]
-    )
+    updates.push('updated_at = NOW()')
+
+    if (updates.length > 1) {
+      await execute(
+        `UPDATE clientes SET ${updates.join(', ')} WHERE id = $1`,
+        params
+      )
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {

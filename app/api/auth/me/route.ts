@@ -22,6 +22,11 @@ export async function GET() {
       cliente_id: user.cliente_id,
       cliente_nombre: user.cliente_nombre,
       debe_cambiar_password: user.debe_cambiar_password,
+      // Limites del cliente
+      limite_usuarios: user.limite_usuarios,
+      limite_contactos: user.limite_contactos,
+      limite_agentes: user.limite_agentes,
+      limite_mensajes_mes: user.limite_mensajes_mes,
     })
   } catch (error) {
     console.error('Auth check error:', error)

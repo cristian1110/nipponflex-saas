@@ -12,8 +12,8 @@ interface Cliente {
   plan: string
   plan_nombre?: string
   estado: string
-  tipo_cliente: string
   total_usuarios: number
+  limite_usuarios: number
   whatsapps_conectados: number
   created_at: string
 }
@@ -31,7 +31,13 @@ interface Configuracion {
 interface Plan {
   id: number
   nombre: string
-  precio: number
+  precio_mensual: number
+  max_usuarios: number
+  max_contactos: number
+  max_mensajes_mes: number
+  max_agentes: number
+  max_campanas_mes: number
+  es_personalizado: boolean
 }
 
 export default function SistemaAdminPage() {
@@ -43,7 +49,18 @@ export default function SistemaAdminPage() {
   // Clientes
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [showCrearCliente, setShowCrearCliente] = useState(false)
-  const [nuevoCliente, setNuevoCliente] = useState({ nombre_empresa: '', email: '', telefono: '', plan_id: '1', tipo_cliente: 'normal' })
+  const [nuevoCliente, setNuevoCliente] = useState({
+    nombre_empresa: '',
+    email: '',
+    telefono: '',
+    plan_id: '1',
+    // Limites personalizados (solo cuando plan es Personalizado)
+    limite_usuarios: 5,
+    limite_contactos: 1000,
+    limite_mensajes_mes: 2000,
+    limite_agentes: 2,
+    limite_campanas_mes: 5
+  })
   const [creandoCliente, setCreandoCliente] = useState(false)
 
   // Configuraciones
@@ -103,6 +120,9 @@ export default function SistemaAdminPage() {
     } catch (e) { console.error(e) }
   }
 
+  const planSeleccionado = planes.find(p => p.id === Number(nuevoCliente.plan_id))
+  const esPlanPersonalizado = planSeleccionado?.es_personalizado || false
+
   const crearCliente = async () => {
     if (!nuevoCliente.nombre_empresa || !nuevoCliente.email) {
       setMessage({ type: 'error', text: 'Nombre y email son requeridos' })
@@ -113,13 +133,26 @@ export default function SistemaAdminPage() {
       const res = await fetch('/api/admin/clientes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nuevoCliente)
+        body: JSON.stringify({
+          ...nuevoCliente,
+          es_personalizado: esPlanPersonalizado
+        })
       })
       const data = await res.json()
       if (data.success) {
         setMessage({ type: 'success', text: 'Cliente creado exitosamente' })
         setShowCrearCliente(false)
-        setNuevoCliente({ nombre_empresa: '', email: '', telefono: '', plan_id: '1', tipo_cliente: 'normal' })
+        setNuevoCliente({
+          nombre_empresa: '',
+          email: '',
+          telefono: '',
+          plan_id: '1',
+          limite_usuarios: 5,
+          limite_contactos: 1000,
+          limite_mensajes_mes: 2000,
+          limite_agentes: 2,
+          limite_campanas_mes: 5
+        })
         loadClientes()
       } else {
         setMessage({ type: 'error', text: data.error })
@@ -236,7 +269,6 @@ export default function SistemaAdminPage() {
                       <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Empresa</th>
                       <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Email</th>
                       <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Plan</th>
-                      <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Tipo</th>
                       <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Usuarios</th>
                       <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">WhatsApp</th>
                       <th className="text-left px-4 py-3 text-sm text-[var(--text-secondary)]">Estado</th>
@@ -254,13 +286,14 @@ export default function SistemaAdminPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded text-xs ${
-                            c.tipo_cliente === 'superadmin' ? 'bg-purple-500/20 text-purple-400' : 'bg-gray-500/20 text-gray-400'
+                          <span className={`font-medium ${
+                            c.total_usuarios >= c.limite_usuarios && c.limite_usuarios > 0
+                              ? 'text-red-400'
+                              : 'text-[var(--text-primary)]'
                           }`}>
-                            {c.tipo_cliente}
+                            {c.total_usuarios}/{c.limite_usuarios === -1 ? '∞' : c.limite_usuarios}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-[var(--text-primary)]">{c.total_usuarios}</td>
                         <td className="px-4 py-3">
                           <span className={`w-3 h-3 rounded-full inline-block ${c.whatsapps_conectados > 0 ? 'bg-emerald-400' : 'bg-gray-400'}`}></span>
                           <span className="ml-2 text-sm text-[var(--text-secondary)]">{c.whatsapps_conectados}</span>
@@ -510,7 +543,7 @@ export default function SistemaAdminPage() {
       {/* Modal Crear Cliente */}
       {showCrearCliente && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--bg-secondary)] rounded-xl p-6 w-full max-w-md">
+          <div className="bg-[var(--bg-secondary)] rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold text-[var(--text-primary)]">Nuevo Cliente</h3>
               <button onClick={() => setShowCrearCliente(false)} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
@@ -555,22 +588,73 @@ export default function SistemaAdminPage() {
                   className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
                 >
                   {planes.map(p => (
-                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                    <option key={p.id} value={p.id}>
+                      {p.nombre} {p.es_personalizado ? '' : `(${p.max_usuarios} usuarios)`}
+                    </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm text-[var(--text-secondary)] mb-1">Tipo de cliente</label>
-                <select
-                  value={nuevoCliente.tipo_cliente}
-                  onChange={(e) => setNuevoCliente({ ...nuevoCliente, tipo_cliente: e.target.value })}
-                  className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)]"
-                >
-                  <option value="normal">Normal</option>
-                  <option value="superadmin">Super Admin (sin limites)</option>
-                </select>
-              </div>
+              {/* Campos de limites personalizados - solo si es plan Personalizado */}
+              {esPlanPersonalizado && (
+                <div className="border border-emerald-500/30 rounded-lg p-4 bg-emerald-500/5">
+                  <h4 className="text-sm font-medium text-emerald-400 mb-3">Limites Personalizados</h4>
+                  <p className="text-xs text-[var(--text-tertiary)] mb-3">Define los limites para este cliente. Usa -1 para ilimitado.</p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-[var(--text-secondary)] mb-1">Usuarios</label>
+                      <input
+                        type="number"
+                        value={nuevoCliente.limite_usuarios}
+                        onChange={(e) => setNuevoCliente({ ...nuevoCliente, limite_usuarios: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm"
+                        min="-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-secondary)] mb-1">Contactos</label>
+                      <input
+                        type="number"
+                        value={nuevoCliente.limite_contactos}
+                        onChange={(e) => setNuevoCliente({ ...nuevoCliente, limite_contactos: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm"
+                        min="-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-secondary)] mb-1">Mensajes/mes</label>
+                      <input
+                        type="number"
+                        value={nuevoCliente.limite_mensajes_mes}
+                        onChange={(e) => setNuevoCliente({ ...nuevoCliente, limite_mensajes_mes: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm"
+                        min="-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-secondary)] mb-1">Agentes IA</label>
+                      <input
+                        type="number"
+                        value={nuevoCliente.limite_agentes}
+                        onChange={(e) => setNuevoCliente({ ...nuevoCliente, limite_agentes: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm"
+                        min="-1"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs text-[var(--text-secondary)] mb-1">Campanas/mes</label>
+                      <input
+                        type="number"
+                        value={nuevoCliente.limite_campanas_mes}
+                        onChange={(e) => setNuevoCliente({ ...nuevoCliente, limite_campanas_mes: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm"
+                        min="-1"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-3 mt-6">
                 <button

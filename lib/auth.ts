@@ -60,7 +60,8 @@ export async function getCurrentUser(): Promise<(Usuario & { debe_cambiar_passwo
     const user = await queryOne<any>(
       `SELECT u.id, u.email, u.nombre, u.apellido, u.telefono, u.cliente_id, u.estado, u.debe_cambiar_password,
               r.nombre as rol, r.nivel,
-              c.nombre_empresa as cliente_nombre
+              c.nombre_empresa as cliente_nombre,
+              c.limite_usuarios, c.limite_contactos, c.limite_agentes, c.limite_mensajes_mes
        FROM usuarios u
        LEFT JOIN roles r ON u.rol_id = r.id
        LEFT JOIN clientes c ON u.cliente_id = c.id

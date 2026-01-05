@@ -47,6 +47,10 @@ export default function UsuariosPage() {
   const [credencialesCreadas, setCredencialesCreadas] = useState<CredencialesCreadas | null>(null)
   const [enviandoCredenciales, setEnviandoCredenciales] = useState(false)
 
+  // Limites de usuarios
+  const [limiteUsuarios, setLimiteUsuarios] = useState<number>(0)
+  const [totalUsuarios, setTotalUsuarios] = useState<number>(0)
+
   const [nuevoUsuario, setNuevoUsuario] = useState({
     nombre: '',
     email: '',
@@ -56,7 +60,7 @@ export default function UsuariosPage() {
   })
 
   // Clientes (solo para super admin)
-  const [clientes, setClientes] = useState<{ id: number; nombre_empresa: string }[]>([])
+  const [clientes, setClientes] = useState<{ id: number; nombre_empresa: string; limite_usuarios?: number }[]>([])
 
   useEffect(() => { checkAuth() }, [])
 
@@ -66,6 +70,12 @@ export default function UsuariosPage() {
       if (!res.ok) { router.push('/login'); return }
       const data = await res.json()
       setUser(data)
+
+      // Cargar limite de usuarios del cliente
+      if (data.limite_usuarios !== undefined) {
+        setLimiteUsuarios(data.limite_usuarios)
+      }
+
       loadData()
       loadRoles()
       if (data.nivel >= 100) {
@@ -89,7 +99,9 @@ export default function UsuariosPage() {
       const res = await fetch('/api/usuarios')
       if (res.ok) {
         const data = await res.json()
-        setUsuarios(Array.isArray(data) ? data : [])
+        const usuariosArray = Array.isArray(data) ? data : []
+        setUsuarios(usuariosArray)
+        setTotalUsuarios(usuariosArray.length)
       }
     } catch (e) { console.error(e) }
     setLoading(false)
@@ -198,6 +210,10 @@ export default function UsuariosPage() {
   const isAdmin = user?.nivel >= 50
   const isSuperAdmin = user?.nivel >= 100
 
+  // Super admin no tiene limite, otros usuarios si
+  const limiteAlcanzado = !isSuperAdmin && limiteUsuarios > 0 && totalUsuarios >= limiteUsuarios
+  const mostrarContador = !isSuperAdmin && limiteUsuarios > 0
+
   if (loading) {
     return (
       <div className="flex h-screen bg-[var(--bg-primary)] items-center justify-center">
@@ -213,16 +229,40 @@ export default function UsuariosPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-[var(--bg-secondary)] border-b border-[var(--border-color)] px-6 py-4 flex justify-between items-center">
           <div>
-            <h1 className="text-xl font-bold text-[var(--text-primary)]">Usuarios</h1>
-            <p className="text-sm text-[var(--text-secondary)]">Gestiona los usuarios de tu cuenta</p>
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-bold text-[var(--text-primary)]">Usuarios</h1>
+              {mostrarContador && (
+                <span className={`px-2 py-1 rounded text-sm font-medium ${
+                  limiteAlcanzado
+                    ? 'bg-red-500/20 text-red-400'
+                    : 'bg-emerald-500/20 text-emerald-400'
+                }`}>
+                  {totalUsuarios}/{limiteUsuarios}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-[var(--text-secondary)]">
+              Gestiona los usuarios de tu cuenta
+              {limiteAlcanzado && <span className="text-red-400 ml-2">(Limite alcanzado)</span>}
+            </p>
           </div>
           {isAdmin && (
-            <button
-              onClick={() => setShowCrear(true)}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2"
-            >
-              <span>+</span> Nuevo Usuario
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={() => setShowCrear(true)}
+                disabled={limiteAlcanzado}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
+                  limiteAlcanzado
+                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                }`}
+              >
+                <span>+</span> Nuevo Usuario
+              </button>
+              {limiteAlcanzado && (
+                <span className="text-xs text-red-400">Actualiza tu plan para mas usuarios</span>
+              )}
+            </div>
           )}
         </div>
 
@@ -231,7 +271,7 @@ export default function UsuariosPage() {
             <div className="text-center py-12 bg-[var(--bg-secondary)] rounded-xl">
               <div className="text-4xl mb-3">👥</div>
               <p className="text-[var(--text-secondary)]">No hay usuarios registrados</p>
-              {isAdmin && (
+              {isAdmin && !limiteAlcanzado && (
                 <button onClick={() => setShowCrear(true)} className="mt-4 text-emerald-500 hover:underline">
                   + Crear primer usuario
                 </button>
