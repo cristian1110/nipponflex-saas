@@ -1,11 +1,30 @@
 # NipponFlex - Estado del Proyecto
-> Ultima actualizacion: 5 de enero 2026, 11:00 AM
+> Ultima actualizacion: 5 de enero 2026, 15:45 PM
 
 ---
 
 ## COMPLETADO HOY (5 enero 2026)
 
-### Plan Personalizado + Limite de Usuarios
+### Deteccion Automatica de Desconexion WhatsApp (Sesion 2)
+- [x] Deteccion cuando usuario desconecta desde el celular (Dispositivos vinculados)
+- [x] Logout automatico para evitar loop de QR codes (cuello de botella)
+- [x] Nuevas funciones en `lib/evolution.ts`:
+  - `DISCONNECTION_CODES` - Constantes para codigos de Evolution API
+  - `isDeviceRemovedDisconnection()` - Detecta desconexion desde celular (401, 440)
+  - `requiresManualReconnection()` - Identifica si necesita escanear QR
+  - `isTemporaryDisconnection()` - Detecta desconexiones temporales (408, 428)
+  - `configureWebhook()` - Configura webhook automaticamente
+  - `getWebhookConfig()` - Verifica configuracion del webhook
+- [x] Webhook mejorado para manejar estados: 'close', 'disconnected', 'connecting', 'open'
+- [x] Configuracion automatica de webhook al crear instancia y al solicitar QR
+- [x] UI mejorada con estados visuales:
+  - Verde = Conectado
+  - Naranja = Desconexion desde dispositivo o problema detectado
+  - Amarillo = Desconexion temporal (reconectando automaticamente)
+- [x] Mensajes descriptivos segun tipo de desconexion
+- [x] Actualizacion inmediata de BD con motivo de desconexion
+
+### Plan Personalizado + Limite de Usuarios (Sesion 1)
 - [x] Nuevo plan "Personalizado" con limites editables
 - [x] Campos dinamicos en Admin Sistema al crear cliente con plan personalizado
 - [x] Columna `es_personalizado` en tabla planes
@@ -200,7 +219,13 @@ GOOGLE_CLIENT_SECRET=pendiente
 ## ARCHIVOS MODIFICADOS/CREADOS HOY (5 enero 2026)
 
 ```
-# Plan Personalizado + Limites
+# Deteccion Desconexion WhatsApp (Sesion 2)
+lib/evolution.ts                             - Funciones de deteccion y configuracion webhook
+app/api/webhook/whatsapp/route.ts            - Manejo mejorado de eventos de conexion
+app/api/whatsapp/route.ts                    - Configuracion automatica de webhook
+app/integraciones/page.tsx                   - UI con estados visuales de desconexion
+
+# Plan Personalizado + Limites (Sesion 1)
 app/admin/sistema/page.tsx                   - Plan personalizado + limites dinamicos
 app/usuarios/page.tsx                        - Contador X/Y + bloqueo limite
 app/api/planes/route.ts                      - Devuelve es_personalizado
@@ -224,11 +249,12 @@ app/api/leads/route.ts                       - POST para crear leads
 
 ## NOTAS IMPORTANTES
 
-1. **Plan Personalizado** - Super admin puede crear clientes con limites a medida
-2. **Limite de usuarios visible** - Cada empresa ve cuantos usuarios tiene vs limite
-3. **Conversaciones aisladas** - Cada vendedor ve solo sus chats
-4. **Meta WhatsApp Business** - Proximo paso grande: migrar a API oficial con Embedded Signup
-5. **Multi-tenant real** - Cada cliente conecta su propio WhatsApp Business
+1. **Desconexion WhatsApp automatica** - El sistema detecta cuando el usuario desconecta desde el celular y actualiza la UI automaticamente, evitando loops de QR que causan cuellos de botella
+2. **Plan Personalizado** - Super admin puede crear clientes con limites a medida
+3. **Limite de usuarios visible** - Cada empresa ve cuantos usuarios tiene vs limite
+4. **Conversaciones aisladas** - Cada vendedor ve solo sus chats
+5. **Meta WhatsApp Business** - Proximo paso grande: migrar a API oficial con Embedded Signup
+6. **Multi-tenant real** - Cada cliente conecta su propio WhatsApp Business
 
 ---
 
