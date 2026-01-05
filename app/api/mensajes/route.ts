@@ -158,16 +158,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Error al enviar mensaje', details: data }, { status: 500 })
     }
 
-    // Guardar en historial
+    // Guardar en historial con usuario_id para aislamiento por usuario
     const mensajeGuardado = mediaBase64
       ? (mediaType?.startsWith('image/') ? '[Imagen enviada]' : mediaType?.startsWith('audio/') ? '[Audio enviado]' : mediaType?.startsWith('video/') ? '[Video enviado]' : `[Archivo: ${fileName}]`) + (mensaje ? ` ${mensaje}` : '')
       : mensaje
 
     try {
       await query(
-        `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, mensaje, rol, created_at)
-         VALUES ($1, $2, $3, 'assistant', NOW())`,
-        [user.cliente_id, numero_whatsapp.replace('@s.whatsapp.net', '').replace('+', ''), mensajeGuardado]
+        `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, mensaje, rol, usuario_id, created_at)
+         VALUES ($1, $2, $3, 'assistant', $4, NOW())`,
+        [user.cliente_id, numero_whatsapp.replace('@s.whatsapp.net', '').replace('+', ''), mensajeGuardado, user.id]
       )
     } catch (e) {
       console.error('Error guardando historial:', e)

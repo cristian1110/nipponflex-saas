@@ -5,8 +5,13 @@ import { enviarMensajeWhatsApp, enviarPresencia, enviarAudioWhatsApp } from '@/l
 import {
   getPromptCitas,
   extraerCitaDeRespuesta,
-  limpiarRespuestaCita,
-  crearCitaDesdeIA
+  crearCitaDesdeIA,
+  obtenerCitasDelCliente,
+  extraerModificacionCita,
+  modificarCita,
+  extraerCancelacionCita,
+  cancelarCita,
+  limpiarRespuestaCitas
 } from '@/lib/citas-ia'
 import { buscarContextoRelevante, construirPromptConRAG } from '@/lib/rag'
 import { descargarMedia, base64ToBuffer, esAudioCompatible, esImagenCompatible } from '@/lib/media'
@@ -174,11 +179,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Guardar mensaje entrante en historial
+    // Buscar el ultimo usuario que respondio a este numero (para asignar la conversacion)
+    const ultimoUsuario = await queryOne(
+      `SELECT usuario_id FROM historial_conversaciones
+       WHERE cliente_id = $1 AND numero_whatsapp = $2 AND usuario_id IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1`,
+      [clienteId, numero]
+    )
+    const usuarioAsignado = ultimoUsuario?.usuario_id || null
+
+    // Guardar mensaje entrante en historial (asignado al usuario que respondio previamente)
     await query(
-      `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje)
-       VALUES ($1, $2, 'user', $3)`,
-      [clienteId, numero, texto]
+      `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje, usuario_id)
+       VALUES ($1, $2, 'user', $3, $4)`,
+      [clienteId, numero, texto, usuarioAsignado]
     )
 
     // Buscar o crear lead
@@ -260,9 +274,9 @@ export async function POST(request: NextRequest) {
           })
 
           await query(
-            `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje)
-             VALUES ($1, $2, 'assistant', $3)`,
-            [clienteId, numero, config.mensaje_fuera_horario]
+            `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje, usuario_id)
+             VALUES ($1, $2, 'assistant', $3, $4)`,
+            [clienteId, numero, config.mensaje_fuera_horario, usuarioAsignado]
           )
         }
 
@@ -289,11 +303,15 @@ export async function POST(request: NextRequest) {
     const sentimiento = await analizarSentimiento(texto)
     console.log(`Sentimiento detectado: ${sentimiento.sentimiento} (${sentimiento.emocion})`)
 
+    // Obtener citas del cliente para informar al agente
+    const citasDelCliente = await obtenerCitasDelCliente(clienteId, numero)
+    console.log(`Citas del cliente: ${citasDelCliente.length} encontradas`)
+
     // Obtener nombre del agente (priorizar nombre_custom sobre nombre_agente)
     const nombreAgente = agente.nombre_custom || agente.nombre_agente || 'Asistente'
 
-    // Construir mensajes para la IA (incluir instrucciones de citas)
-    const promptBase = agente.prompt_sistema + getPromptCitas()
+    // Construir mensajes para la IA (incluir instrucciones de citas con info del cliente)
+    const promptBase = agente.prompt_sistema + getPromptCitas(citasDelCliente)
     const promptSistema = construirPromptConRAG(
       promptBase,
       contextoRelevante,
@@ -344,28 +362,63 @@ export async function POST(request: NextRequest) {
 
     // Verificar si la IA agendó una cita
     let citaCreada = null
-    const citaDetectada = extraerCitaDeRespuesta(respuestaIA.content)
+    let citaModificada = null
+    let citaCancelada = null
 
+    const citaDetectada = extraerCitaDeRespuesta(respuestaIA.content)
     if (citaDetectada) {
       console.log('Cita detectada en respuesta IA:', citaDetectada)
-
       const resultadoCita = await crearCitaDesdeIA(
         clienteId,
         lead?.id || null,
         numero,
         citaDetectada
       )
-
       if (resultadoCita.success) {
         citaCreada = resultadoCita.citaId
         console.log('Cita creada automáticamente:', citaCreada)
       } else {
         console.error('Error creando cita:', resultadoCita.error)
       }
-
-      // Limpiar la respuesta para no mostrar el bloque técnico al usuario
-      respuestaIA.content = limpiarRespuestaCita(respuestaIA.content)
     }
+
+    // Verificar si la IA modificó una cita
+    const modificacionDetectada = extraerModificacionCita(respuestaIA.content)
+    if (modificacionDetectada) {
+      console.log('Modificación de cita detectada:', modificacionDetectada)
+      const resultadoModificacion = await modificarCita(
+        clienteId,
+        modificacionDetectada.citaId,
+        modificacionDetectada.nuevaFecha,
+        modificacionDetectada.nuevaHora
+      )
+      if (resultadoModificacion.success) {
+        citaModificada = modificacionDetectada.citaId
+        console.log('Cita modificada automáticamente:', citaModificada)
+      } else {
+        console.error('Error modificando cita:', resultadoModificacion.error)
+      }
+    }
+
+    // Verificar si la IA canceló una cita
+    const cancelacionDetectada = extraerCancelacionCita(respuestaIA.content)
+    if (cancelacionDetectada) {
+      console.log('Cancelación de cita detectada:', cancelacionDetectada)
+      const resultadoCancelacion = await cancelarCita(
+        clienteId,
+        cancelacionDetectada.citaId,
+        cancelacionDetectada.motivo
+      )
+      if (resultadoCancelacion.success) {
+        citaCancelada = cancelacionDetectada.citaId
+        console.log('Cita cancelada automáticamente:', citaCancelada)
+      } else {
+        console.error('Error cancelando cita:', resultadoCancelacion.error)
+      }
+    }
+
+    // Limpiar la respuesta para no mostrar los bloques técnicos al usuario
+    respuestaIA.content = limpiarRespuestaCitas(respuestaIA.content)
 
     // Enviar respuesta por WhatsApp (audio si el usuario envió audio, texto si envió texto)
     let resultado
@@ -457,11 +510,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ status: 'error', error: resultado?.error })
     }
 
-    // Guardar respuesta en historial
+    // Guardar respuesta en historial (mantener asignacion al mismo usuario)
     await query(
-      `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje)
-       VALUES ($1, $2, 'assistant', $3)`,
-      [clienteId, numero, respuestaIA.content]
+      `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje, usuario_id)
+       VALUES ($1, $2, 'assistant', $3, $4)`,
+      [clienteId, numero, respuestaIA.content, usuarioAsignado]
     )
 
     // Incrementar contador de mensajes del cliente
@@ -479,6 +532,8 @@ export async function POST(request: NextRequest) {
       enviado_como_audio: enviadoComoAudio,
       tokens_usados: respuestaIA.tokensUsados,
       cita_creada: citaCreada,
+      cita_modificada: citaModificada,
+      cita_cancelada: citaCancelada,
     })
 
   } catch (error) {

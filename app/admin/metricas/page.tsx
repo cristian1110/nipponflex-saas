@@ -85,16 +85,16 @@ export default function MetricasAPIPage() {
     setLoading(false)
   }
 
-  const formatNumber = (n: number | null) => {
-    if (!n) return '0'
-    if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M'
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-    return n.toLocaleString()
+  const formatNumber = (n: number | string | null) => {
+    const num = Number(n) || 0
+    if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M'
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+    return num.toLocaleString()
   }
 
-  const formatCosto = (n: number | null) => {
-    if (!n) return '$0.00'
-    return '$' + n.toFixed(4)
+  const formatCosto = (n: number | string | null) => {
+    const num = Number(n) || 0
+    return '$' + num.toFixed(4)
   }
 
   if (loading || !user) {
@@ -132,7 +132,7 @@ export default function MetricasAPIPage() {
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-emerald-100 text-sm">Costo Total ({dias} días)</p>
-                <p className="text-4xl font-bold">${(resumen?.costo_total || 0).toFixed(4)}</p>
+                <p className="text-4xl font-bold">${Number(resumen?.costo_total || 0).toFixed(4)}</p>
               </div>
               <div className="text-right">
                 <p className="text-emerald-100 text-sm">Tokens Totales</p>

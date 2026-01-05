@@ -177,24 +177,29 @@ export async function enviarAudioWhatsApp(options: SendMediaOptions): Promise<Se
   const numeroFormateado = numero.includes('@') ? numero : `${numero}@s.whatsapp.net`
 
   try {
+    // Evolution API v2 usa endpoint sendWhatsAppAudio para notas de voz
     const body: any = {
       number: numeroFormateado,
-      mediatype: 'audio',
-      mimetype: mimetype || 'audio/mpeg',
+      delay: 1200,
     }
 
     if (mediaUrl) {
-      body.media = mediaUrl
+      body.audio = mediaUrl
     } else if (mediaBase64) {
-      // Evolution API espera base64 puro sin prefijo data:
-      body.media = mediaBase64.includes('base64,')
-        ? mediaBase64.split('base64,')[1]
-        : mediaBase64
+      // Evolution API v2 espera base64 PURO sin prefijo data:
+      let base64Puro = mediaBase64
+      if (mediaBase64.includes('base64,')) {
+        base64Puro = mediaBase64.split('base64,')[1]
+      }
+      body.audio = base64Puro
     } else {
       return { success: false, error: 'No se proporcionó audio' }
     }
 
-    const response = await fetch(`${EVOLUTION_URL}/message/sendMedia/${instancia}`, {
+    console.log(`Enviando audio como nota de voz: base64 puro (${body.audio.length} chars)`)
+
+    // Usar endpoint sendWhatsAppAudio para que llegue como nota de voz
+    const response = await fetch(`${EVOLUTION_URL}/message/sendWhatsAppAudio/${instancia}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -206,10 +211,39 @@ export async function enviarAudioWhatsApp(options: SendMediaOptions): Promise<Se
     if (!response.ok) {
       const errorText = await response.text()
       console.error('Error Evolution API (audio):', response.status, errorText)
-      return { success: false, error: `Error ${response.status}: ${errorText}` }
+
+      // Si falla sendWhatsAppAudio, intentar con sendMedia
+      console.log('Intentando con sendMedia como fallback...')
+      const fallbackBody = {
+        number: numeroFormateado,
+        mediatype: 'audio',
+        mimetype: 'audio/mp4',
+        media: body.audio,
+        delay: 1200,
+      }
+
+      const fallbackResponse = await fetch(`${EVOLUTION_URL}/message/sendMedia/${instancia}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': apiKey,
+        },
+        body: JSON.stringify(fallbackBody),
+      })
+
+      if (!fallbackResponse.ok) {
+        const fallbackError = await fallbackResponse.text()
+        console.error('Error Evolution API (audio fallback):', fallbackResponse.status, fallbackError)
+        return { success: false, error: `Error ${response.status}: ${errorText}` }
+      }
+
+      const fallbackData = await fallbackResponse.json()
+      console.log('Audio enviado exitosamente (fallback):', fallbackData.key?.id || fallbackData.messageId)
+      return { success: true, messageId: fallbackData.key?.id || fallbackData.messageId }
     }
 
     const data = await response.json()
+    console.log('Audio enviado exitosamente:', data.key?.id || data.messageId)
     return { success: true, messageId: data.key?.id || data.messageId }
   } catch (error) {
     console.error('Error enviando audio WhatsApp:', error)

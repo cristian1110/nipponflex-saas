@@ -1,6 +1,6 @@
 // Utilidades para agendar citas desde el chat IA
 
-import { queryOne } from './db'
+import { queryOne, query, execute } from './db'
 
 export interface CitaDetectada {
   detectada: boolean
@@ -207,23 +207,36 @@ export const OPCIONES_RECORDATORIO = [
 ]
 
 // Prompt adicional para que la IA detecte y confirme citas
-export function getPromptCitas(): string {
+export function getPromptCitas(citasDelCliente?: any[]): string {
   const hoy = new Date()
   const manana = new Date(hoy)
   manana.setDate(manana.getDate() + 1)
 
   const formatoFecha = (d: Date) => d.toISOString().split('T')[0]
 
+  let citasInfo = ''
+  if (citasDelCliente && citasDelCliente.length > 0) {
+    citasInfo = `
+## CITAS DEL CLIENTE
+El cliente tiene las siguientes citas programadas:
+${citasDelCliente.map((c, i) => `${i + 1}. ID: ${c.id} - "${c.titulo}" - ${c.fecha_formateada} a las ${c.hora_formateada} - Estado: ${c.estado}`).join('\n')}
+
+Si el cliente pregunta por sus citas, proporciona esta información.
+`
+  }
+
   return `
 
-## AGENDAR CITAS
+## GESTIÓN DE CITAS
 Fecha de hoy: ${formatoFecha(hoy)}
 Fecha de mañana: ${formatoFecha(manana)}
+${citasInfo}
 
-Puedes ayudar a los clientes a agendar citas. Cuando detectes que el cliente quiere agendar una cita:
+### AGENDAR NUEVA CITA
+Cuando el cliente quiere agendar una cita:
 1. Pregunta la fecha y hora deseada si no la mencionó
 2. Confirma los detalles antes de agendar
-3. Si el cliente confirma, responde en el siguiente formato especial (el sistema lo detectará automáticamente):
+3. Si el cliente confirma, responde con:
 
 [CITA_CONFIRMADA]
 fecha: YYYY-MM-DD
@@ -232,10 +245,38 @@ titulo: Descripción breve de la cita
 duracion: 30
 [/CITA_CONFIRMADA]
 
+### CONSULTAR CITAS
+Si el cliente pregunta por sus citas (ej: "¿tengo citas?", "mi cita", "cuándo es mi cita"):
+- Proporciona la información de las citas listadas arriba
+- Si no tiene citas, indica que no tiene citas programadas
+
+### MODIFICAR CITA
+Si el cliente quiere cambiar la fecha/hora de una cita existente:
+1. Confirma qué cita desea modificar (si tiene varias)
+2. Pregunta la nueva fecha y hora
+3. Confirma el cambio y responde con:
+
+[CITA_MODIFICADA]
+cita_id: (número del ID de la cita)
+nueva_fecha: YYYY-MM-DD
+nueva_hora: HH:MM
+[/CITA_MODIFICADA]
+
+### CANCELAR CITA
+Si el cliente quiere cancelar una cita:
+1. Confirma qué cita desea cancelar (si tiene varias)
+2. Pide confirmación de cancelación
+3. Si confirma, responde con:
+
+[CITA_CANCELADA]
+cita_id: (número del ID de la cita)
+motivo: (razón breve de cancelación)
+[/CITA_CANCELADA]
+
 IMPORTANTE:
 - Usa SIEMPRE el año ${hoy.getFullYear()} para las fechas
 - Si dicen "mañana", usa la fecha ${formatoFecha(manana)}
-- Solo incluye el bloque [CITA_CONFIRMADA] cuando el cliente haya confirmado explícitamente la cita
+- Solo incluye los bloques especiales cuando el cliente haya confirmado explícitamente la acción
 `
 }
 
@@ -281,11 +322,6 @@ export function extraerCitaDeRespuesta(respuesta: string): CitaDetectada | null 
   }
 }
 
-// Limpiar respuesta removiendo el bloque de cita para mostrar al usuario
-export function limpiarRespuestaCita(respuesta: string): string {
-  return respuesta.replace(/\[CITA_CONFIRMADA\][\s\S]*?\[\/CITA_CONFIRMADA\]/gi, '').trim()
-}
-
 // Crear cita en la base de datos
 export async function crearCitaDesdeIA(
   clienteId: number,
@@ -302,6 +338,12 @@ export async function crearCitaDesdeIA(
     const fechaFin = new Date(fechaInicio)
     fechaFin.setMinutes(fechaFin.getMinutes() + (citaData.duracion || 30))
 
+    // Usar formato local para evitar conversión UTC
+    const fechaInicioStr = formatearFechaLocal(fechaInicio)
+    const fechaFinStr = formatearFechaLocal(fechaFin)
+
+    console.log(`Creando cita: ${citaData.titulo} - ${fechaInicioStr} a ${fechaFinStr}`)
+
     const result = await queryOne(
       `INSERT INTO citas (
         cliente_id, lead_id, titulo, descripcion,
@@ -315,8 +357,8 @@ export async function crearCitaDesdeIA(
         leadId,
         citaData.titulo || 'Cita agendada por IA',
         citaData.descripcion || 'Cita agendada automáticamente desde WhatsApp',
-        fechaInicio.toISOString(),
-        fechaFin.toISOString(),
+        fechaInicioStr,
+        fechaFinStr,
         telefono
       ]
     )
@@ -331,4 +373,197 @@ export async function crearCitaDesdeIA(
     console.error('Error creando cita desde IA:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
   }
+}
+
+// Obtener citas de un cliente por teléfono
+export async function obtenerCitasDelCliente(
+  clienteId: number,
+  telefono: string
+): Promise<any[]> {
+  try {
+    const citas = await query(
+      `SELECT
+        c.id,
+        c.titulo,
+        c.descripcion,
+        c.fecha_inicio,
+        c.fecha_fin,
+        c.estado,
+        to_char(c.fecha_inicio, 'DD/MM/YYYY') as fecha_formateada,
+        to_char(c.fecha_inicio, 'HH12:MI') || ' ' ||
+        CASE WHEN EXTRACT(HOUR FROM c.fecha_inicio) >= 12 THEN 'p.m.' ELSE 'a.m.' END as hora_formateada
+      FROM citas c
+      LEFT JOIN leads l ON c.lead_id = l.id
+      WHERE c.cliente_id = $1
+        AND (c.telefono_recordatorio = $2 OR l.telefono = $2)
+        AND c.estado IN ('pendiente', 'confirmada')
+        AND c.fecha_inicio >= NOW() - interval '1 day'
+      ORDER BY c.fecha_inicio
+      LIMIT 10`,
+      [clienteId, telefono]
+    )
+    return citas
+  } catch (error) {
+    console.error('Error obteniendo citas del cliente:', error)
+    return []
+  }
+}
+
+// Extraer modificación de cita de la respuesta
+export interface CitaModificada {
+  citaId: number
+  nuevaFecha: string
+  nuevaHora: string
+}
+
+export function extraerModificacionCita(respuesta: string): CitaModificada | null {
+  const regex = /\[CITA_MODIFICADA\]([\s\S]*?)\[\/CITA_MODIFICADA\]/i
+  const match = respuesta.match(regex)
+
+  if (!match) return null
+
+  const contenido = match[1]
+  const datos: Record<string, string> = {}
+
+  const lineas = contenido.split('\n')
+  for (const linea of lineas) {
+    const [clave, ...valor] = linea.split(':')
+    if (clave && valor.length) {
+      datos[clave.trim().toLowerCase().replace('_', '')] = valor.join(':').trim()
+    }
+  }
+
+  if (!datos.citaid || !datos.nuevafecha || !datos.nuevahora) return null
+
+  return {
+    citaId: parseInt(datos.citaid),
+    nuevaFecha: datos.nuevafecha,
+    nuevaHora: datos.nuevahora
+  }
+}
+
+// Modificar cita existente
+export async function modificarCita(
+  clienteId: number,
+  citaId: number,
+  nuevaFecha: string,
+  nuevaHora: string
+): Promise<{ success: boolean, error?: string }> {
+  try {
+    // Verificar que la cita pertenece al cliente
+    const cita = await queryOne(
+      `SELECT id FROM citas WHERE id = $1 AND cliente_id = $2`,
+      [citaId, clienteId]
+    )
+
+    if (!cita) {
+      return { success: false, error: 'Cita no encontrada' }
+    }
+
+    // Construir nueva fecha/hora
+    const [year, month, day] = nuevaFecha.split('-').map(Number)
+    const [hours, minutes] = nuevaHora.split(':').map(Number)
+    const fechaInicio = new Date(year, month - 1, day, hours, minutes)
+    const fechaFin = new Date(fechaInicio)
+    fechaFin.setMinutes(fechaFin.getMinutes() + 30)
+
+    const fechaInicioStr = formatearFechaLocal(fechaInicio)
+    const fechaFinStr = formatearFechaLocal(fechaFin)
+
+    await execute(
+      `UPDATE citas
+       SET fecha_inicio = $1, fecha_fin = $2, recordatorio_enviado = false, updated_at = NOW()
+       WHERE id = $3`,
+      [fechaInicioStr, fechaFinStr, citaId]
+    )
+
+    console.log(`Cita ${citaId} modificada a ${fechaInicioStr}`)
+    return { success: true }
+  } catch (error) {
+    console.error('Error modificando cita:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
+// Formatear fecha local (mover a scope global en el archivo)
+function formatearFechaLocal(fecha: Date): string {
+  const year = fecha.getFullYear()
+  const month = String(fecha.getMonth() + 1).padStart(2, '0')
+  const day = String(fecha.getDate()).padStart(2, '0')
+  const hours = String(fecha.getHours()).padStart(2, '0')
+  const minutes = String(fecha.getMinutes()).padStart(2, '0')
+  const seconds = String(fecha.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`
+}
+
+// Extraer cancelación de cita de la respuesta
+export interface CitaCancelada {
+  citaId: number
+  motivo: string
+}
+
+export function extraerCancelacionCita(respuesta: string): CitaCancelada | null {
+  const regex = /\[CITA_CANCELADA\]([\s\S]*?)\[\/CITA_CANCELADA\]/i
+  const match = respuesta.match(regex)
+
+  if (!match) return null
+
+  const contenido = match[1]
+  const datos: Record<string, string> = {}
+
+  const lineas = contenido.split('\n')
+  for (const linea of lineas) {
+    const [clave, ...valor] = linea.split(':')
+    if (clave && valor.length) {
+      datos[clave.trim().toLowerCase().replace('_', '')] = valor.join(':').trim()
+    }
+  }
+
+  if (!datos.citaid) return null
+
+  return {
+    citaId: parseInt(datos.citaid),
+    motivo: datos.motivo || 'Cancelada por el cliente'
+  }
+}
+
+// Cancelar cita existente
+export async function cancelarCita(
+  clienteId: number,
+  citaId: number,
+  motivo: string
+): Promise<{ success: boolean, error?: string }> {
+  try {
+    // Verificar que la cita pertenece al cliente
+    const cita = await queryOne(
+      `SELECT id FROM citas WHERE id = $1 AND cliente_id = $2`,
+      [citaId, clienteId]
+    )
+
+    if (!cita) {
+      return { success: false, error: 'Cita no encontrada' }
+    }
+
+    await execute(
+      `UPDATE citas
+       SET estado = 'cancelada', descripcion = COALESCE(descripcion, '') || ' | Cancelada: ' || $1, updated_at = NOW()
+       WHERE id = $2`,
+      [motivo, citaId]
+    )
+
+    console.log(`Cita ${citaId} cancelada: ${motivo}`)
+    return { success: true }
+  } catch (error) {
+    console.error('Error cancelando cita:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
+// Limpiar respuesta removiendo bloques de cita/modificación/cancelación
+export function limpiarRespuestaCitas(respuesta: string): string {
+  return respuesta
+    .replace(/\[CITA_CONFIRMADA\][\s\S]*?\[\/CITA_CONFIRMADA\]/gi, '')
+    .replace(/\[CITA_MODIFICADA\][\s\S]*?\[\/CITA_MODIFICADA\]/gi, '')
+    .replace(/\[CITA_CANCELADA\][\s\S]*?\[\/CITA_CANCELADA\]/gi, '')
+    .trim()
 }

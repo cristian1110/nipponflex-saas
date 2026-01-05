@@ -20,12 +20,19 @@ export async function POST(request: NextRequest) {
     // - Estado pendiente o confirmada
     // - Recordatorio no enviado
     // - Recordatorio configurado (recordatorio_minutos > 0)
-    // - Fecha/hora está dentro del tiempo de recordatorio (usando zona horaria del cliente)
+    // - Fecha/hora está dentro del tiempo de recordatorio
     // - Tienen teléfono asociado (del lead o directo)
-    // IMPORTANTE: La comparación se hace en la zona horaria del cliente
+    // NOTA: fecha_inicio se guarda como hora local del cliente (sin timezone)
+    // Usamos AT TIME ZONE para convertir correctamente a UTC para comparar con NOW()
     const citasPendientes = await query(`
       SELECT
-        c.id, c.titulo, c.fecha_inicio, c.recordatorio_canal,
+        c.id, c.titulo, c.fecha_inicio,
+        to_char(c.fecha_inicio, 'HH12:MI') as hora_formateada,
+        CASE
+          WHEN EXTRACT(HOUR FROM c.fecha_inicio) >= 12 THEN 'p.m.'
+          ELSE 'a.m.'
+        END as periodo,
+        c.recordatorio_canal,
         c.telefono_recordatorio, c.recordatorio_minutos,
         c.recordatorio_mensaje,
         l.telefono as lead_telefono, l.nombre as lead_nombre,
@@ -41,8 +48,8 @@ export async function POST(request: NextRequest) {
         AND c.recordatorio_enviado = false
         AND COALESCE(c.recordatorio_activo, true) = true
         AND COALESCE(c.recordatorio_minutos, 120) > 0
-        AND c.fecha_inicio > (NOW() AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil'))
-        AND c.fecha_inicio <= (NOW() AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil')) + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
+        AND (c.fecha_inicio AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil')) > NOW()
+        AND (c.fecha_inicio AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil')) <= NOW() + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
         AND (c.telefono_recordatorio IS NOT NULL OR l.telefono IS NOT NULL)
       ORDER BY c.fecha_inicio
       LIMIT 20
@@ -65,9 +72,10 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Formatear fecha y hora en la zona horaria e idioma del cliente
+      // Formatear fecha y hora
+      // La hora ya viene formateada desde SQL (hora_formateada y periodo)
+      // para evitar problemas de conversión de timezone
       const fechaCita = new Date(cita.fecha_inicio)
-      const zonaHoraria = cita.zona_horaria || 'America/Guayaquil'
       const idioma = cita.idioma || 'es'
 
       // Mapeo de códigos de idioma a locales completos
@@ -78,18 +86,14 @@ export async function POST(request: NextRequest) {
       }
       const locale = localeMap[idioma] || 'es-ES'
 
+      // Formatear solo la fecha (día, mes) - sin conversión de timezone
       const fechaFormateada = fechaCita.toLocaleDateString(locale, {
         weekday: 'long',
         day: 'numeric',
-        month: 'long',
-        timeZone: zonaHoraria
+        month: 'long'
       })
-      const horaFormateada = fechaCita.toLocaleTimeString(locale, {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-        timeZone: zonaHoraria
-      })
+      // Usar la hora formateada directamente desde SQL para evitar problemas de timezone
+      const horaFormateada = `${cita.hora_formateada} ${cita.periodo}`
 
       // Construir mensaje de recordatorio
       const nombreCliente = cita.lead_nombre || 'Estimado cliente'
@@ -185,7 +189,8 @@ Por favor, confirma tu asistencia respondiendo a este mensaje.
 
 // GET para verificar estado del worker
 export async function GET() {
-  // Contar citas pendientes de recordatorio considerando zona horaria de cada cliente
+  // Contar citas pendientes de recordatorio
+  // NOTA: fecha_inicio se guarda como hora local del cliente, usamos AT TIME ZONE para comparar
   const pendientes = await queryOne(`
     SELECT COUNT(*) as total
     FROM citas c
@@ -194,8 +199,8 @@ export async function GET() {
       AND c.recordatorio_enviado = false
       AND COALESCE(c.recordatorio_activo, true) = true
       AND COALESCE(c.recordatorio_minutos, 120) > 0
-      AND c.fecha_inicio > (NOW() AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil'))
-      AND c.fecha_inicio <= (NOW() AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil')) + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
+      AND (c.fecha_inicio AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil')) > NOW()
+      AND (c.fecha_inicio AT TIME ZONE COALESCE(cl.zona_horaria, 'America/Guayaquil')) <= NOW() + (COALESCE(c.recordatorio_minutos, 120) || ' minutes')::interval
   `)
 
   return NextResponse.json({

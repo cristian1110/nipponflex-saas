@@ -4,6 +4,64 @@ import { getCurrentUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
+export async function POST(request: NextRequest) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+    const body = await request.json()
+    const { nombre, telefono, email, empresa, origen, notas, etapa_id, pipeline_id } = body
+
+    if (!nombre?.trim()) {
+      return NextResponse.json({ error: 'El nombre es requerido' }, { status: 400 })
+    }
+
+    // Si no se especifica etapa, obtener la primera del pipeline por defecto
+    let etapaFinal = etapa_id
+    if (!etapaFinal) {
+      const pipelineIdToUse = pipeline_id || null
+      let etapaQuery = `
+        SELECT id FROM etapas_crm
+        WHERE cliente_id = $1
+      `
+      const etapaParams: any[] = [user.cliente_id]
+
+      if (pipelineIdToUse) {
+        etapaQuery += ` AND pipeline_id = $2 ORDER BY orden ASC LIMIT 1`
+        etapaParams.push(pipelineIdToUse)
+      } else {
+        etapaQuery += ` ORDER BY orden ASC LIMIT 1`
+      }
+
+      const etapas = await query(etapaQuery, etapaParams)
+      if (etapas.length > 0) {
+        etapaFinal = etapas[0].id
+      }
+    }
+
+    // Insertar el lead
+    const result = await query(
+      `INSERT INTO leads (cliente_id, nombre, telefono, email, empresa, origen, notas, etapa_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, nombre, telefono, email, empresa, origen, etapa_id, created_at`,
+      [user.cliente_id, nombre.trim(), telefono || null, email || null, empresa || null, origen || 'manual', notas || null, etapaFinal]
+    )
+
+    // Actualizar conversacion si existe con ese numero
+    if (telefono) {
+      await query(
+        `UPDATE conversaciones SET lead_id = $1 WHERE contacto_telefono = $2 AND cliente_id = $3`,
+        [result[0].id, telefono, user.cliente_id]
+      )
+    }
+
+    return NextResponse.json({ lead: result[0] })
+  } catch (error) {
+    console.error('Error creando lead:', error)
+    return NextResponse.json({ error: 'Error al crear lead' }, { status: 500 })
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser()

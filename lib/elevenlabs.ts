@@ -64,9 +64,13 @@ export async function generarAudio(params: GenerarAudioParams): Promise<GenerarA
     voiceId = VOCES_PREDETERMINADAS.adam.id, // Voz predeterminada
     modelo = 'eleven_multilingual_v2', // Mejor para español
     clienteId,
-    stability = 0.5,
-    similarityBoost = 0.75,
-    style = 0.5,
+    // Parámetros ajustados para sonido más natural:
+    // - stability más baja = más variación natural en el habla
+    // - similarityBoost alta = más fiel a la voz original
+    // - style más alto = más expresividad emocional
+    stability = 0.35,
+    similarityBoost = 0.85,
+    style = 0.65,
     useSpeakerBoost = true,
   } = params
 
