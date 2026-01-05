@@ -1,9 +1,38 @@
 # NipponFlex - Estado del Proyecto
-> Ultima actualizacion: 4 de enero 2026, 12:00 PM
+> Ultima actualizacion: 5 de enero 2026, 11:00 AM
 
 ---
 
-## COMPLETADO HOY (4 enero 2026 - Sesion 3)
+## COMPLETADO HOY (5 enero 2026)
+
+### Plan Personalizado + Limite de Usuarios
+- [x] Nuevo plan "Personalizado" con limites editables
+- [x] Campos dinamicos en Admin Sistema al crear cliente con plan personalizado
+- [x] Columna `es_personalizado` en tabla planes
+- [x] Contador X/Y en pagina Usuarios (ej: 3/5)
+- [x] Boton "Nuevo Usuario" se bloquea al alcanzar limite
+- [x] Mensaje "Actualiza tu plan para mas usuarios"
+- [x] Super admin sin limites de usuarios
+- [x] Eliminado campo `tipo_cliente` (no se usaba)
+- [x] Columna Usuarios muestra X/Y en tabla clientes (Admin)
+
+### Metricas APIs - Correccion
+- [x] Fix error client-side: convertir strings a numeros antes de toFixed()
+- [x] PostgreSQL devuelve SUMs como strings, el frontend ahora los parsea
+
+### Aislamiento de Conversaciones por Usuario
+- [x] Cada usuario solo ve SUS propias conversaciones
+- [x] Super admin ve todas las conversaciones del cliente
+- [x] Campo `usuario_id` guardado en `historial_conversaciones`
+- [x] Webhook asigna mensajes entrantes al ultimo usuario que respondio
+
+### Leads desde Conversaciones
+- [x] POST `/api/leads` para crear contactos desde chat
+- [x] Asignar etapa automaticamente si no se especifica
+
+---
+
+## COMPLETADO (4 enero 2026 - Sesion 3)
 
 ### Multi-idioma y Zona Horaria
 - [x] Campo `zona_horaria` en tabla clientes (default: America/Guayaquil)
@@ -104,7 +133,19 @@
 
 ## PENDIENTE
 
-### 1. Integracion Twilio/Vonage (Llamadas) - Prioridad Alta
+### 1. API Oficial de Meta - WhatsApp Business (Prioridad Alta)
+- [ ] Migrar de Evolution API a Meta WhatsApp Business API oficial
+- [ ] Implementar **Embedded Signup** para onboarding multi-tenant
+  - Cada cliente conecta SU propia cuenta de WhatsApp Business
+  - No requiere configuracion manual de tokens
+  - Flow OAuth integrado en la plataforma
+- [ ] Crear app en Meta Business Suite
+- [ ] Configurar webhook para mensajes entrantes
+- [ ] Soporte para templates de mensajes (HSM)
+- [ ] Verificacion de negocios en Meta
+- [ ] Variables: `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_TOKEN`
+
+### 2. Integracion Twilio/Vonage (Llamadas) - Prioridad Media
 - [ ] Decidir: Twilio o Vonage
 - [ ] Crear cuenta y obtener credenciales
 - [ ] Agregar variables al .env
@@ -112,14 +153,14 @@
 - [ ] Webhook para recibir llamadas entrantes
 - [ ] Integrar con agente IA
 
-### 2. Completar Google Calendar - Prioridad Baja
+### 3. Completar Google Calendar - Prioridad Baja
 - [ ] Configurar proyecto en Google Cloud Console
 - [ ] Habilitar Google Calendar API
 - [ ] Crear credenciales OAuth 2.0
 - [ ] Agregar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET
 - [ ] Probar flujo completo
 
-### 3. Mejoras Pendientes
+### 4. Mejoras Pendientes
 - [ ] Reportes exportables (PDF/Excel)
 - [ ] Dashboard con mas graficos
 - [ ] Notificaciones push
@@ -144,6 +185,9 @@ EVOLUTION_API_KEY=configurado
 
 ### Pendientes
 ```
+META_APP_ID=pendiente
+META_APP_SECRET=pendiente
+META_WEBHOOK_TOKEN=pendiente
 TWILIO_ACCOUNT_SID=pendiente
 TWILIO_AUTH_TOKEN=pendiente
 TWILIO_PHONE_NUMBER=pendiente
@@ -153,43 +197,39 @@ GOOGLE_CLIENT_SECRET=pendiente
 
 ---
 
-## ARCHIVOS MODIFICADOS/CREADOS HOY (Sesion 3)
+## ARCHIVOS MODIFICADOS/CREADOS HOY (5 enero 2026)
 
 ```
-# Multi-idioma y Zona Horaria
-locales/es.json                              - NUEVO - Traducciones espanol
-locales/en.json                              - NUEVO - Traducciones ingles
-locales/pt.json                              - NUEVO - Traducciones portugues
-lib/i18n.tsx                                 - NUEVO - Hook useTranslation
-app/api/cliente/configuracion/route.ts       - NUEVO - API config regional
-app/api/worker/recordatorios/route.ts        - Usa zona horaria del cliente
-app/configuracion/page.tsx                   - Nueva pestana Regional
-components/Sidebar.tsx                       - Traducciones
+# Plan Personalizado + Limites
+app/admin/sistema/page.tsx                   - Plan personalizado + limites dinamicos
+app/usuarios/page.tsx                        - Contador X/Y + bloqueo limite
+app/api/planes/route.ts                      - Devuelve es_personalizado
+app/api/admin/clientes/route.ts              - Acepta limites personalizados
+app/api/auth/me/route.ts                     - Devuelve limites del cliente
+lib/auth.ts                                  - Incluye limites en getCurrentUser
 
-# Conversaciones
-app/conversaciones/page.tsx                  - Boton Crear contacto + Modal
+# Metricas APIs
+app/admin/metricas/page.tsx                  - Fix strings a numeros
 
-# Dashboard
-app/dashboard/page.tsx                       - Estado del sistema real
-app/api/sistema/estado/route.ts              - NUEVO - API estado sistema
-app/api/metricas/dashboard/route.ts          - Fix conteo contactos
+# Aislamiento conversaciones
+app/conversaciones/page.tsx                  - Filtro por usuario_id
+app/api/conversaciones/route.ts              - WHERE usuario_id
+app/api/webhook/evolution/route.ts           - Asigna usuario_id
 
-# Limite de importacion
-app/api/contactos/importar/route.ts          - Verificacion de limite
-app/api/crm/importar/route.ts                - Verificacion de limite
-app/crm/page.tsx                             - UI mensaje limite
+# Leads
+app/api/leads/route.ts                       - POST para crear leads
 ```
 
 ---
 
 ## NOTAS IMPORTANTES
 
-1. **Cada cliente tiene su zona horaria** - Los recordatorios llegan a la hora correcta
-2. **Multi-idioma activo** - ES, EN, PT disponibles en Configuracion > Regional
-3. **Limite de contactos se respeta** - No puedes importar mas de lo que permite el plan
-4. **Estado del sistema en tiempo real** - Dashboard muestra si WhatsApp y Agente estan activos
-5. **Crear contacto desde chat** - Si alguien escribe y no es contacto, puedes agregarlo
+1. **Plan Personalizado** - Super admin puede crear clientes con limites a medida
+2. **Limite de usuarios visible** - Cada empresa ve cuantos usuarios tiene vs limite
+3. **Conversaciones aisladas** - Cada vendedor ve solo sus chats
+4. **Meta WhatsApp Business** - Proximo paso grande: migrar a API oficial con Embedded Signup
+5. **Multi-tenant real** - Cada cliente conecta su propio WhatsApp Business
 
 ---
 
-*Continuar con integracion de llamadas (Twilio/Vonage)*
+*Proximo: Implementar API oficial de Meta con Embedded Signup para WhatsApp multi-tenant*
