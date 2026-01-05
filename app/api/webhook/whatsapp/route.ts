@@ -5,11 +5,10 @@ import {
   enviarMensajeWhatsApp,
   enviarPresencia,
   enviarAudioWhatsApp,
-  logoutInstance,
+  deleteInstance,
   isDeviceRemovedDisconnection,
   requiresManualReconnection,
-  isTemporaryDisconnection,
-  DISCONNECTION_CODES
+  isTemporaryDisconnection
 } from '@/lib/evolution'
 import {
   getPromptCitas,
@@ -142,7 +141,6 @@ export async function POST(request: NextRequest) {
       // =====================================================
       if (state === 'close' || state === 'disconnected') {
         console.log(`[Webhook] ⚠️ CONEXIÓN CERRADA | Instancia: ${instance} | Código: ${statusReason}`)
-        console.log(`[Webhook] Objeto desconexión:`, disconnectionObject)
 
         // Obtener instancia de la BD
         const instanciaDB = await queryOne(
@@ -160,56 +158,49 @@ export async function POST(request: NextRequest) {
         }
 
         const apiKey = instanciaDB.evolution_api_key || process.env.EVOLUTION_API_KEY || ''
-        let motivoDesconexion = 'unknown'
-        let shouldLogout = false
+        let shouldDelete = false
 
-        // Determinar el tipo de desconexión
+        // Determinar si debemos eliminar la instancia
         if (isDeviceRemovedDisconnection(statusReason, disconnectionObject)) {
-          // Desconexión desde el dispositivo (usuario cerró sesión desde el celular)
-          motivoDesconexion = 'device_removed'
-          shouldLogout = true
-          console.log(`[Webhook] 📱 Desconexión detectada: Usuario cerró sesión desde el celular`)
+          shouldDelete = true
+          console.log(`[Webhook] 📱 Desconexión desde celular detectada`)
         } else if (requiresManualReconnection(statusReason, disconnectionObject)) {
-          // Requiere reconexión manual (escanear QR de nuevo)
-          motivoDesconexion = 'manual_reconnect_required'
-          shouldLogout = true
-          console.log(`[Webhook] 🔄 Requiere reconexión manual con QR`)
+          shouldDelete = true
+          console.log(`[Webhook] 🔄 Requiere reconexión manual`)
         } else if (isTemporaryDisconnection(statusReason)) {
-          // Desconexión temporal (puede recuperarse sola)
-          motivoDesconexion = 'temporary'
-          shouldLogout = false
-          console.log(`[Webhook] ⏳ Desconexión temporal (código ${statusReason}), esperando reconexión automática`)
+          shouldDelete = false
+          console.log(`[Webhook] ⏳ Desconexión temporal, esperando reconexión automática`)
         } else {
-          // Desconexión desconocida - ser conservador y hacer logout
-          motivoDesconexion = `code_${statusReason || 'unknown'}`
-          shouldLogout = statusReason === 401 || statusReason === 440 || !statusReason
-          console.log(`[Webhook] ❓ Desconexión con código ${statusReason}, shouldLogout: ${shouldLogout}`)
+          // Para otros casos, eliminar si el código indica problema serio
+          shouldDelete = statusReason === 401 || statusReason === 440 || !statusReason
         }
 
-        // Hacer logout si es necesario para evitar loop de QR
-        if (shouldLogout) {
-          console.log(`[Webhook] 🛑 Ejecutando logout para evitar loop de QR...`)
-          const logoutResult = await logoutInstance(instance, apiKey)
-          console.log(`[Webhook] Logout: ${logoutResult.success ? 'exitoso' : 'falló - ' + logoutResult.error}`)
+        // Eliminar instancia si es necesario
+        if (shouldDelete) {
+          console.log(`[Webhook] 🗑️ Eliminando instancia ${instance}...`)
+          const deleteResult = await deleteInstance(instance, apiKey)
+          console.log(`[Webhook] Eliminación: ${deleteResult.success ? 'exitosa' : 'falló - ' + deleteResult.error}`)
           resetQrRateLimit(instance)
+
+          // Eliminar de BD
+          await execute(
+            `DELETE FROM instancias_whatsapp WHERE evolution_instance = $1`,
+            [instance]
+          )
+          console.log(`[Webhook] ✅ Instancia eliminada de BD`)
+        } else {
+          // Solo actualizar estado para desconexiones temporales
+          await execute(
+            `UPDATE instancias_whatsapp
+             SET estado = 'desconectado', updated_at = NOW()
+             WHERE evolution_instance = $1`,
+            [instance]
+          )
         }
-
-        // Actualizar estado en BD
-        await execute(
-          `UPDATE instancias_whatsapp
-           SET estado = 'desconectado',
-               motivo_desconexion = $2,
-               updated_at = NOW()
-           WHERE evolution_instance = $1`,
-          [instance, motivoDesconexion]
-        )
-
-        console.log(`[Webhook] ✅ BD actualizada: estado=desconectado, motivo=${motivoDesconexion}`)
 
         return NextResponse.json({
           status: 'disconnection_handled',
-          reason: motivoDesconexion,
-          logout: shouldLogout,
+          deleted: shouldDelete,
           instance
         })
       }

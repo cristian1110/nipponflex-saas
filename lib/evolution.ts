@@ -382,6 +382,33 @@ export async function restartInstance(instancia: string, apiKey: string): Promis
 }
 
 /**
+ * Elimina una instancia completamente de Evolution API
+ * Esto es útil cuando el usuario se desconecta para evitar instancias zombie
+ */
+export async function deleteInstance(instancia: string, apiKey: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`[Evolution] Eliminando instancia: ${instancia}`)
+
+    const response = await fetch(`${EVOLUTION_URL}/instance/delete/${instancia}`, {
+      method: 'DELETE',
+      headers: { 'apikey': apiKey }
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[Evolution] Error eliminando instancia: ${response.status} - ${errorText}`)
+      return { success: false, error: `Error ${response.status}: ${errorText}` }
+    }
+
+    console.log(`[Evolution] Instancia ${instancia} eliminada exitosamente`)
+    return { success: true }
+  } catch (error) {
+    console.error('[Evolution] Error eliminando instancia:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
+/**
  * Códigos de desconexión de WhatsApp/Evolution API
  * https://github.com/EvolutionAPI/evolution-api
  */

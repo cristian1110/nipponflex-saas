@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { queryOne, execute } from '@/lib/db'
-import { configureWebhook, getWebhookConfig } from '@/lib/evolution'
+import { configureWebhook, getWebhookConfig, deleteInstance } from '@/lib/evolution'
 
 export const dynamic = 'force-dynamic'
 
@@ -293,19 +293,18 @@ export async function POST(request: NextRequest) {
     const apiKey = clientInstance.apiKey
 
     if (action === 'logout') {
-      const res = await fetch(`${EVOLUTION_URL}/instance/logout/${instance}`, {
-        method: 'DELETE',
-        headers: { 'apikey': apiKey }
-      })
+      // Eliminar instancia de Evolution API completamente
+      const deleteResult = await deleteInstance(instance, apiKey)
 
-      // Actualizar estado en BD
+      // Eliminar registro de la BD
       await execute(
-        `UPDATE instancias_whatsapp SET estado = 'desconectado', updated_at = NOW()
-         WHERE cliente_id = $1 AND evolution_instance = $2`,
+        `DELETE FROM instancias_whatsapp WHERE cliente_id = $1 AND evolution_instance = $2`,
         [user.cliente_id, instance]
       )
 
-      return NextResponse.json({ success: true, data: await res.json() })
+      console.log(`[WhatsApp] Instancia ${instance} eliminada. Evolution: ${deleteResult.success}`)
+
+      return NextResponse.json({ success: true, deleted: deleteResult.success })
     }
 
     return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })

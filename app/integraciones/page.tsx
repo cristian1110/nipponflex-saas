@@ -12,11 +12,6 @@ interface WhatsAppStatus {
   name?: string
   qrcode?: string
   instance?: string
-  disconnectionReason?: string | null
-  disconnectedFromDevice?: boolean
-  disconnectedByQrLoop?: boolean
-  isTemporaryDisconnection?: boolean
-  disconnectionMessage?: string | null
 }
 
 export default function IntegracionesPage() {
@@ -73,15 +68,16 @@ export default function IntegracionesPage() {
           connected: data.connected || data.state === 'open',
           number: data.number || data.ownerJid?.replace('@s.whatsapp.net', ''),
           name: data.pushName || data.name,
-          instance: data.instance,
-          disconnectionReason: data.disconnectionReason,
-          disconnectedFromDevice: data.disconnectedFromDevice,
-          disconnectedByQrLoop: data.disconnectedByQrLoop,
-          isTemporaryDisconnection: data.isTemporaryDisconnection,
-          disconnectionMessage: data.disconnectionMessage
+          instance: data.instance
         })
+      } else {
+        // Si no hay instancia, mostrar como desconectado
+        setWaStatus({ connected: false })
       }
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      setWaStatus({ connected: false })
+    }
   }
 
   const connectWhatsApp = async () => {
@@ -376,53 +372,22 @@ export default function IntegracionesPage() {
                 <div className={`p-4 rounded-xl mb-6 ${
                   waStatus.connected
                     ? 'bg-emerald-500/20 border border-emerald-500/30'
-                    : waStatus.disconnectedFromDevice || waStatus.disconnectedByQrLoop
-                      ? 'bg-orange-500/20 border border-orange-500/30'
-                      : waStatus.isTemporaryDisconnection
-                        ? 'bg-yellow-500/20 border border-yellow-500/30'
-                        : 'bg-[var(--bg-secondary)] border border-[var(--border-color)]'
+                    : 'bg-[var(--bg-secondary)] border border-[var(--border-color)]'
                 }`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className={`w-4 h-4 rounded-full ${
-                        waStatus.connected
-                          ? 'bg-emerald-500 animate-pulse'
-                          : waStatus.disconnectedFromDevice || waStatus.disconnectedByQrLoop
-                            ? 'bg-orange-500'
-                            : waStatus.isTemporaryDisconnection
-                              ? 'bg-yellow-500 animate-pulse'
-                              : 'bg-gray-400'
+                        waStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'
                       }`}></div>
                       <div>
                         <p className={`font-medium ${
-                          waStatus.connected
-                            ? 'text-emerald-400'
-                            : waStatus.disconnectedFromDevice || waStatus.disconnectedByQrLoop
-                              ? 'text-orange-400'
-                              : waStatus.isTemporaryDisconnection
-                                ? 'text-yellow-400'
-                                : 'text-[var(--text-primary)]'
+                          waStatus.connected ? 'text-emerald-400' : 'text-[var(--text-primary)]'
                         }`}>
-                          {waStatus.connected
-                            ? '● Conectado'
-                            : waStatus.disconnectedFromDevice
-                              ? '⚠️ Desconectado desde el dispositivo'
-                              : waStatus.disconnectedByQrLoop
-                                ? '⚠️ Desconectado (problema detectado)'
-                                : waStatus.isTemporaryDisconnection
-                                  ? '⏳ Reconectando...'
-                                  : '○ Desconectado'}
+                          {waStatus.connected ? '● Conectado' : '○ Desconectado'}
                         </p>
                         {waStatus.connected && waStatus.number && (
                           <p className="text-sm text-[var(--text-secondary)]">
                             📱 +{waStatus.number} {waStatus.name && `(${waStatus.name})`}
-                          </p>
-                        )}
-                        {!waStatus.connected && waStatus.disconnectionMessage && (
-                          <p className={`text-sm ${
-                            waStatus.isTemporaryDisconnection ? 'text-yellow-300' : 'text-orange-300'
-                          }`}>
-                            {waStatus.disconnectionMessage}
                           </p>
                         )}
                       </div>
@@ -433,67 +398,11 @@ export default function IntegracionesPage() {
                       </button>
                     ) : (
                       <button onClick={connectWhatsApp} disabled={waLoading} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm disabled:opacity-50 hover:bg-emerald-700">
-                        {waLoading ? 'Cargando...' : '📲 Reconectar con QR'}
+                        {waLoading ? 'Cargando...' : '📲 Conectar con QR'}
                       </button>
                     )}
                   </div>
                 </div>
-
-                {/* Alerta de desconexión */}
-                {(waStatus.disconnectedFromDevice || waStatus.disconnectedByQrLoop || waStatus.isTemporaryDisconnection) && !showQR && (
-                  <div className={`border rounded-xl p-4 mb-6 ${
-                    waStatus.isTemporaryDisconnection
-                      ? 'bg-yellow-500/10 border-yellow-500/30'
-                      : 'bg-orange-500/10 border-orange-500/30'
-                  }`}>
-                    <div className="flex items-start gap-3">
-                      <span className="text-2xl">
-                        {waStatus.isTemporaryDisconnection ? '⏳' : waStatus.disconnectedFromDevice ? '📱' : '⚠️'}
-                      </span>
-                      <div>
-                        <h4 className={`font-medium mb-1 ${
-                          waStatus.isTemporaryDisconnection ? 'text-yellow-400' : 'text-orange-400'
-                        }`}>
-                          {waStatus.isTemporaryDisconnection
-                            ? 'Conexión temporal perdida'
-                            : waStatus.disconnectedFromDevice
-                              ? 'WhatsApp desconectado desde tu teléfono'
-                              : 'WhatsApp desconectado'}
-                        </h4>
-                        <p className={`text-sm mb-3 ${
-                          waStatus.isTemporaryDisconnection ? 'text-yellow-300/80' : 'text-orange-300/80'
-                        }`}>
-                          {waStatus.disconnectionMessage || (
-                            waStatus.disconnectedFromDevice
-                              ? 'Se detectó que cerraste la sesión de WhatsApp Web desde la app de tu teléfono (Ajustes → Dispositivos vinculados → Cerrar sesión).'
-                              : waStatus.disconnectedByQrLoop
-                                ? 'Se detectó un problema de conexión y se cerró la sesión automáticamente para evitar problemas.'
-                                : 'La conexión con WhatsApp se ha perdido.'
-                          )}
-                        </p>
-                        {!waStatus.isTemporaryDisconnection && (
-                          <>
-                            <p className="text-sm text-orange-300/80 mb-3">
-                              Para volver a conectar, haz clic en "Reconectar con QR" y escanea el nuevo código QR.
-                            </p>
-                            <button
-                              onClick={connectWhatsApp}
-                              disabled={waLoading}
-                              className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 disabled:opacity-50"
-                            >
-                              {waLoading ? 'Cargando...' : '🔄 Reconectar ahora'}
-                            </button>
-                          </>
-                        )}
-                        {waStatus.isTemporaryDisconnection && (
-                          <p className="text-sm text-yellow-300/80">
-                            El sistema está intentando reconectar automáticamente. Si no se reconecta en unos minutos, haz clic en "Reconectar con QR".
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 {/* QR Code */}
                 {showQR && (
