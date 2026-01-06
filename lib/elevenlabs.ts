@@ -3,6 +3,122 @@ import { registrarUsoAPI, PRECIOS_API } from './metricas'
 
 const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1'
 
+// Límite máximo de caracteres para audio (evita respuestas cortadas)
+const MAX_CARACTERES_AUDIO = 500
+
+/**
+ * Limpia el texto para enviarlo a ElevenLabs
+ * Elimina: markdown, emojis, URLs, caracteres especiales que pueden causar
+ * cambio de idioma o ruidos extraños
+ */
+export function limpiarTextoParaAudio(texto: string): string {
+  let limpio = texto
+
+  // 1. Eliminar URLs
+  limpio = limpio.replace(/https?:\/\/[^\s]+/gi, '')
+  limpio = limpio.replace(/www\.[^\s]+/gi, '')
+
+  // 2. Eliminar markdown
+  limpio = limpio.replace(/\*\*([^*]+)\*\*/g, '$1') // **bold**
+  limpio = limpio.replace(/\*([^*]+)\*/g, '$1')     // *italic*
+  limpio = limpio.replace(/__([^_]+)__/g, '$1')     // __bold__
+  limpio = limpio.replace(/_([^_]+)_/g, '$1')       // _italic_
+  limpio = limpio.replace(/~~([^~]+)~~/g, '$1')     // ~~strikethrough~~
+  limpio = limpio.replace(/`([^`]+)`/g, '$1')       // `code`
+  limpio = limpio.replace(/```[\s\S]*?```/g, '')    // ```code blocks```
+  limpio = limpio.replace(/^#+\s*/gm, '')           // # headers
+  limpio = limpio.replace(/^[-*+]\s*/gm, '')        // - list items
+  limpio = limpio.replace(/^\d+\.\s*/gm, '')        // 1. numbered lists
+  limpio = limpio.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // [link](url)
+
+  // 3. Eliminar emojis y símbolos especiales
+  limpio = limpio.replace(/[\u{1F600}-\u{1F64F}]/gu, '') // Emoticons
+  limpio = limpio.replace(/[\u{1F300}-\u{1F5FF}]/gu, '') // Misc Symbols
+  limpio = limpio.replace(/[\u{1F680}-\u{1F6FF}]/gu, '') // Transport
+  limpio = limpio.replace(/[\u{1F700}-\u{1F77F}]/gu, '') // Alchemical
+  limpio = limpio.replace(/[\u{1F780}-\u{1F7FF}]/gu, '') // Geometric
+  limpio = limpio.replace(/[\u{1F800}-\u{1F8FF}]/gu, '') // Arrows
+  limpio = limpio.replace(/[\u{1F900}-\u{1F9FF}]/gu, '') // Supplemental
+  limpio = limpio.replace(/[\u{1FA00}-\u{1FA6F}]/gu, '') // Chess
+  limpio = limpio.replace(/[\u{1FA70}-\u{1FAFF}]/gu, '') // Symbols
+  limpio = limpio.replace(/[\u{2600}-\u{26FF}]/gu, '')   // Misc symbols
+  limpio = limpio.replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
+  limpio = limpio.replace(/[\u{FE00}-\u{FE0F}]/gu, '')   // Variation Selectors
+
+  // 4. Eliminar caracteres especiales que pueden causar problemas
+  limpio = limpio.replace(/[<>{}[\]\\|^~`]/g, '')
+
+  // 5. Normalizar comillas y apóstrofes
+  limpio = limpio.replace(/[""]/g, '"')
+  limpio = limpio.replace(/['']/g, "'")
+
+  // 6. Eliminar caracteres no-ASCII sospechosos (mantener acentos españoles)
+  // Mantener: a-z, A-Z, 0-9, espacios, puntuación básica, acentos españoles
+  limpio = limpio.replace(/[^\w\s.,;:!?¿¡'"()áéíóúüñÁÉÍÓÚÜÑ-]/g, ' ')
+
+  // 7. Limpiar espacios múltiples
+  limpio = limpio.replace(/\s+/g, ' ').trim()
+
+  // 8. Asegurar que termine con puntuación
+  if (limpio && !/[.!?]$/.test(limpio)) {
+    limpio += '.'
+  }
+
+  return limpio
+}
+
+/**
+ * Limita el texto a un máximo de caracteres, cortando en un punto final
+ * para que la frase quede completa
+ */
+export function limitarTextoParaAudio(texto: string, maxCaracteres: number = MAX_CARACTERES_AUDIO): { texto: string; cortado: boolean } {
+  if (texto.length <= maxCaracteres) {
+    return { texto, cortado: false }
+  }
+
+  // Buscar el último punto antes del límite
+  const textoRecortado = texto.substring(0, maxCaracteres)
+  const ultimoPunto = textoRecortado.lastIndexOf('.')
+  const ultimoSigno = Math.max(
+    textoRecortado.lastIndexOf('.'),
+    textoRecortado.lastIndexOf('!'),
+    textoRecortado.lastIndexOf('?')
+  )
+
+  if (ultimoSigno > maxCaracteres * 0.5) {
+    // Cortar en el último signo de puntuación si está después de la mitad
+    return {
+      texto: textoRecortado.substring(0, ultimoSigno + 1) + ' ¿Deseas más información?',
+      cortado: true
+    }
+  } else {
+    // Si no hay buen punto de corte, cortar y agregar puntos suspensivos
+    const ultimoEspacio = textoRecortado.lastIndexOf(' ')
+    const corte = ultimoEspacio > maxCaracteres * 0.7 ? ultimoEspacio : maxCaracteres
+    return {
+      texto: textoRecortado.substring(0, corte).trim() + '... ¿Deseas más información?',
+      cortado: true
+    }
+  }
+}
+
+/**
+ * Prepara el texto completo para enviarlo a ElevenLabs
+ * Combina limpieza + límite de caracteres
+ */
+export function prepararTextoParaAudio(texto: string): { texto: string; cortado: boolean; original: number; final: number } {
+  const original = texto.length
+  const limpio = limpiarTextoParaAudio(texto)
+  const { texto: textoFinal, cortado } = limitarTextoParaAudio(limpio)
+
+  return {
+    texto: textoFinal,
+    cortado,
+    original,
+    final: textoFinal.length
+  }
+}
+
 // Voces predeterminadas de ElevenLabs (multilingual v2)
 export const VOCES_PREDETERMINADAS = {
   'rachel': { id: '21m00Tcm4TlvDq8ikWAM', nombre: 'Rachel', idioma: 'en', genero: 'femenino' },
@@ -149,23 +265,26 @@ export async function generarAudio(params: GenerarAudioParams): Promise<GenerarA
   const {
     texto,
     voiceId = VOCES_PREDETERMINADAS.adam.id, // Voz predeterminada
-    modelo = 'eleven_multilingual_v2', // Mejor para espanol
+    modelo = 'eleven_multilingual_v2', // Mejor para español
     clienteId,
-    // Parametros ajustados para sonido mas natural:
-    // - stability mas baja = mas variacion natural en el habla
-    // - similarityBoost alta = mas fiel a la voz original
-    // - style mas alto = mas expresividad emocional
-    stability = 0.35,
-    similarityBoost = 0.85,
-    style = 0.65,
+    // Parámetros optimizados para audio estable y natural:
+    // - stability 0.5 = balance entre natural y estable (evita ruidos/cambios de idioma)
+    // - similarityBoost 0.75 = fiel a la voz pero con margen
+    // - style 0.3 = expresividad moderada (evita distorsiones)
+    stability = 0.5,
+    similarityBoost = 0.75,
+    style = 0.3,
     useSpeakerBoost = true,
   } = params
 
-  // SOLO convertir horas, nada mas
-  const textoFinal = convertirHorasEnTexto(texto)
+  // 1. Preparar texto: limpiar + limitar caracteres
+  const { texto: textoLimpio, cortado, original, final } = prepararTextoParaAudio(texto)
 
-  console.log('[ElevenLabs] Texto original:', texto.substring(0, 80))
-  console.log('[ElevenLabs] Texto con horas:', textoFinal.substring(0, 80))
+  // 2. Convertir horas a formato hablado
+  const textoFinal = convertirHorasEnTexto(textoLimpio)
+
+  console.log(`[ElevenLabs] Original: ${original} chars -> Limpio: ${final} chars ${cortado ? '(CORTADO)' : ''}`)
+  console.log('[ElevenLabs] Texto a sintetizar:', textoFinal.substring(0, 100) + (textoFinal.length > 100 ? '...' : ''))
 
   const startTime = Date.now()
 
@@ -198,10 +317,26 @@ export async function generarAudio(params: GenerarAudioParams): Promise<GenerarA
     const arrayBuffer = await response.arrayBuffer()
     const audioBuffer = Buffer.from(arrayBuffer)
     const duracionMs = Date.now() - startTime
-    const caracteres = texto.length
+    const caracteres = textoFinal.length
     const costoUsd = caracteres * PRECIOS_API.elevenlabs.default
 
-    // Registrar metricas
+    // Validar que el audio no esté vacío o corrupto
+    if (audioBuffer.length < 1000) {
+      console.error(`[ElevenLabs] Audio muy pequeño (${audioBuffer.length} bytes), posiblemente corrupto`)
+      return null
+    }
+
+    // Validar headers de MP3 (debe empezar con 0xFF 0xFB o ID3)
+    const header = audioBuffer.slice(0, 3)
+    const isValidMP3 = (header[0] === 0xFF && (header[1] & 0xE0) === 0xE0) || // Frame sync
+                       (header[0] === 0x49 && header[1] === 0x44 && header[2] === 0x33) // ID3
+
+    if (!isValidMP3) {
+      console.error('[ElevenLabs] Audio no es MP3 válido, headers:', header.toString('hex'))
+      return null
+    }
+
+    // Registrar métricas
     if (clienteId) {
       await registrarUsoAPI({
         clienteId,
@@ -211,11 +346,11 @@ export async function generarAudio(params: GenerarAudioParams): Promise<GenerarA
         costoUsd,
         duracionMs,
         modelo,
-        metadata: { caracteres, voiceId },
+        metadata: { caracteres, voiceId, cortado },
       })
     }
 
-    console.log(`Audio generado: ${caracteres} caracteres, ${audioBuffer.length} bytes`)
+    console.log(`[ElevenLabs] Audio generado: ${caracteres} chars, ${audioBuffer.length} bytes, ${duracionMs}ms`)
 
     return {
       audioBuffer,

@@ -548,6 +548,12 @@ export async function POST(request: NextRequest) {
     // Obtener nombre del agente (priorizar nombre_custom sobre nombre_agente)
     const nombreAgente = agente.nombre_custom || agente.nombre_agente || 'Asistente'
 
+    // Determinar si se usará audio (para ajustar el prompt)
+    const usaraAudio = agente.responder_con_audio &&
+                       agente.voice_id &&
+                       process.env.ELEVENLABS_API_KEY &&
+                       mensajeEntranteEsAudio
+
     // Construir mensajes para la IA (incluir instrucciones de citas con info del cliente)
     const promptBase = agente.prompt_sistema + getPromptCitas(citasDelCliente)
     const promptSistema = construirPromptConRAG(
@@ -558,7 +564,9 @@ export async function POST(request: NextRequest) {
         sentimiento: {
           tipo: sentimiento.emocion,
           sugerencia: sentimiento.sugerencia
-        }
+        },
+        // Activar modo audio para respuestas más cortas y limpias
+        modoAudio: usaraAudio
       }
     )
 

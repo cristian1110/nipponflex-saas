@@ -128,6 +128,8 @@ export interface OpcionesPrompt {
     tipo: string
     sugerencia: string
   }
+  // Modo audio: respuestas más cortas y sin caracteres especiales
+  modoAudio?: boolean
 }
 
 export function construirPromptConRAG(
@@ -161,16 +163,41 @@ Sugerencia de respuesta: ${opciones.sentimiento.sugerencia}
 `
   }
 
+  // Instrucciones especiales para modo audio
+  if (opciones?.modoAudio) {
+    prompt += `\n## IMPORTANTE: Respuesta para Audio
+Tu respuesta será convertida a audio de voz. DEBES seguir estas reglas estrictamente:
+
+1. LONGITUD: Máximo 2-3 oraciones cortas. No más de 80 palabras total.
+2. FRASES COMPLETAS: Cada oración debe tener sentido por sí sola. Nunca dejes frases incompletas.
+3. FORMATO LIMPIO:
+   - NO uses markdown (*, **, _, #, etc.)
+   - NO uses emojis
+   - NO uses listas con viñetas o números
+   - NO incluyas URLs
+   - Solo texto plano en español
+4. ESTILO HABLADO: Escribe como si estuvieras hablando, no escribiendo.
+5. PUNTUACIÓN: Usa puntos para separar ideas. Termina siempre con punto, signo de interrogación o exclamación.
+6. SI HAY MÁS INFO: Di "¿Te cuento más?" o "¿Quieres que te explique más?" al final.
+
+Ejemplo de respuesta correcta:
+"El Kit Básico incluye el brazalete y el squeeze. Tiene un precio de ciento cincuenta dólares. ¿Te gustaría saber más sobre los beneficios?"
+
+Ejemplo de respuesta INCORRECTA (muy larga):
+"El Kit Básico de Nipponflex es un conjunto completo que incluye varios productos como el Alcaline Squeeze que es un dispositivo para..." (esto se cortaría)
+`
+  }
+
   // Agregar instrucciones generales
   prompt += `\n## Instrucciones de Comportamiento
 - Responde siempre en español
-- Sé conciso y directo (máximo 2-3 párrafos para WhatsApp)
+- Sé conciso y directo${opciones?.modoAudio ? ' (MÁXIMO 2-3 oraciones para audio)' : ' (máximo 2-3 párrafos para WhatsApp)'}
 - Si la información de la base de conocimiento es relevante, úsala
 - Si no sabes algo, dilo honestamente
 - No inventes información
 - Comportate como un humano real, cálido y cercano
 - Usa un tono conversacional y amigable, como si hablaras con un amigo
-- Puedes usar expresiones como "¡Claro!", "Por supuesto", "Con gusto"
+- Puedes usar expresiones como "Claro", "Por supuesto", "Con gusto"
 - Si el usuario está frustrado, muestra empatía genuina
 - Tu nombre es ${nombreAgente} - úsalo cuando te presentes o te pregunten`
 
