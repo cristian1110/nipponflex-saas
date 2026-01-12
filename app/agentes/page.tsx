@@ -498,9 +498,16 @@ export default function AgentesPage() {
                     </div>
                     
                     {conocimientosTemp.length === 0 ? (
-                      <p className="text-sm text-[var(--text-tertiary)] text-center py-4">
-                        Sube PDFs, Excel o TXT con info de tu negocio (precios, productos, FAQs)
-                      </p>
+                      <div className="py-2">
+                        <p className="text-sm text-[var(--text-tertiary)] text-center mb-3">
+                          Sube archivos con info de tu negocio
+                        </p>
+                        <div className="text-xs text-[var(--text-tertiary)] space-y-1">
+                          <p>✓ <strong>Formatos:</strong> PDF, Word, Excel, TXT (máx {limites.max_tamano_mb}MB)</p>
+                          <p>✓ <strong>Contenido:</strong> Catálogos, precios, FAQs, manuales</p>
+                          <p>⚠️ <strong>Importante:</strong> Solo texto (no imágenes/escaneados)</p>
+                        </div>
+                      </div>
                     ) : (
                       <div className="space-y-2">
                         {conocimientosTemp.map((file, i) => (
@@ -644,6 +651,18 @@ export default function AgentesPage() {
                       {uploading ? 'Subiendo...' : '+ Subir archivo'}
                     </button>
                     <input ref={fileInputRefEdit} type="file" accept=".pdf,.docx,.xlsx,.xls,.txt,.csv" onChange={subirArchivo} className="hidden" />
+                  </div>
+
+                  {/* Tips de subida */}
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg mb-4">
+                    <p className="text-xs text-blue-400 font-medium mb-2">📋 Consejos para mejores resultados:</p>
+                    <ul className="text-xs text-blue-300 space-y-1 list-disc list-inside">
+                      <li><strong>Formatos:</strong> PDF, Word (.docx), Excel (.xlsx), TXT, CSV</li>
+                      <li><strong>Tamaño máximo:</strong> {limites.max_tamano_mb}MB por archivo</li>
+                      <li><strong>Solo texto:</strong> Los PDFs escaneados o con imágenes no se procesan bien</li>
+                      <li><strong>Contenido ideal:</strong> Catálogos, precios, FAQs, manuales, info de productos</li>
+                      <li><strong>Tip:</strong> Divide documentos grandes en archivos más pequeños</li>
+                    </ul>
                   </div>
 
                   {conocimientos.length === 0 ? (

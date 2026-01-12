@@ -3,6 +3,7 @@ const nextConfig = {
   output: 'standalone',
   experimental: {
     missingSuspenseWithCSRBailout: false,
+    serverComponentsExternalPackages: ['pdfjs-dist'],
   },
   typescript: {
     ignoreBuildErrors: true,
@@ -12,6 +13,14 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
+  },
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      // Marcar canvas como externo para evitar errores con pdfjs-dist
+      config.externals = config.externals || []
+      config.externals.push('canvas')
+    }
+    return config
   },
 }
 

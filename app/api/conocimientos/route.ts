@@ -105,12 +105,30 @@ export async function POST(request: NextRequest) {
           contenidoTexto += XLSX.utils.sheet_to_txt(sheet) + '\n\n'
         })
       } else if (extension === 'pdf') {
-        // Archivos PDF
-        const pdfParse = require('pdf-parse')
-        const pdfData = await pdfParse(buffer)
-        contenidoTexto = pdfData.text || ''
-        if (!contenidoTexto.trim()) {
-          contenidoTexto = '[PDF sin texto extraíble - posiblemente escaneado]'
+        // Archivos PDF usando pdfjs-dist (más robusto para servidor)
+        try {
+          const pdfjs = require('pdfjs-dist/legacy/build/pdf.js')
+          const data = new Uint8Array(buffer)
+          const loadingTask = pdfjs.getDocument({ data, useSystemFonts: true })
+          const pdf = await loadingTask.promise
+
+          let textoCompleto = ''
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i)
+            const textContent = await page.getTextContent()
+            const pageText = textContent.items
+              .map((item: { str?: string }) => item.str || '')
+              .join(' ')
+            textoCompleto += pageText + '\n'
+          }
+
+          contenidoTexto = textoCompleto.trim()
+          if (!contenidoTexto) {
+            contenidoTexto = '[PDF sin texto extraíble - posiblemente escaneado]'
+          }
+        } catch (pdfError) {
+          console.error('Error extrayendo PDF:', pdfError)
+          contenidoTexto = '[Error al extraer texto del PDF]'
         }
       } else if (extension === 'docx') {
         // Archivos Word

@@ -267,13 +267,14 @@ export async function generarAudio(params: GenerarAudioParams): Promise<GenerarA
     voiceId = VOCES_PREDETERMINADAS.adam.id, // Voz predeterminada
     modelo = 'eleven_multilingual_v2', // Mejor para español
     clienteId,
-    // Parámetros optimizados para audio estable y natural:
-    // - stability 0.5 = balance entre natural y estable (evita ruidos/cambios de idioma)
-    // - similarityBoost 0.75 = fiel a la voz pero con margen
-    // - style 0.3 = expresividad moderada (evita distorsiones)
-    stability = 0.5,
-    similarityBoost = 0.75,
-    style = 0.3,
+    // Parámetros optimizados para voz NATURAL y expresiva:
+    // - stability 0.30 = más variación tonal natural (menos monótono)
+    // - similarityBoost 0.60 = voz más fluida y menos artificial
+    // - style 0.55 = mayor expresividad emocional
+    // - useSpeakerBoost = mejora claridad y presencia
+    stability = 0.30,
+    similarityBoost = 0.60,
+    style = 0.55,
     useSpeakerBoost = true,
   } = params
 

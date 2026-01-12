@@ -5,6 +5,8 @@ import {
   enviarMensajeWhatsApp,
   enviarPresencia,
   enviarAudioWhatsApp,
+  enviarImagenWhatsApp,
+  enviarMediaWhatsApp,
   deleteInstance,
   isDeviceRemovedDisconnection,
   requiresManualReconnection,
@@ -21,7 +23,7 @@ import {
   cancelarCita,
   limpiarRespuestaCitas
 } from '@/lib/citas-ia'
-import { buscarContextoRelevante, construirPromptConRAG } from '@/lib/rag'
+import { buscarContextoRelevante, buscarContextoCompleto, construirPromptConRAG } from '@/lib/rag'
 import { descargarMedia, base64ToBuffer, esAudioCompatible, esImagenCompatible } from '@/lib/media'
 import { generarAudio } from '@/lib/elevenlabs'
 
@@ -534,8 +536,14 @@ export async function POST(request: NextRequest) {
       [clienteId, numero]
     )
 
-    // Buscar contexto relevante en base de conocimiento (RAG)
-    const contextoRelevante = await buscarContextoRelevante(texto, agente.id, 3, 0.2)
+    // Buscar contexto relevante en base de conocimiento (RAG) + Productos
+    const resultadoBusqueda = await buscarContextoCompleto(texto, agente.id, clienteId, 3)
+    const contextoRelevante = resultadoBusqueda.contextos
+    const productosEncontrados = resultadoBusqueda.productos
+
+    if (productosEncontrados.length > 0) {
+      console.log(`[Webhook] Productos encontrados: ${productosEncontrados.map(p => p.nombre).join(', ')}`)
+    }
 
     // Analizar sentimiento del mensaje del usuario
     const sentimiento = await analizarSentimiento(texto)
@@ -566,7 +574,9 @@ export async function POST(request: NextRequest) {
           sugerencia: sentimiento.sugerencia
         },
         // Activar modo audio para respuestas más cortas y limpias
-        modoAudio: usaraAudio
+        modoAudio: usaraAudio,
+        // Incluir productos encontrados del catálogo
+        productos: productosEncontrados
       }
     )
 
@@ -756,11 +766,57 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ status: 'error', error: resultado?.error })
     }
 
+    // Detectar y enviar imágenes/videos del catálogo
+    const imagenesEncontradas = respuestaIA.content.match(/\[IMAGEN:(https?:\/\/[^\]]+)\]/gi) || []
+    const videosEncontrados = respuestaIA.content.match(/\[VIDEO:(https?:\/\/[^\]]+)\]/gi) || []
+
+    // Limpiar marcadores de la respuesta para el historial
+    let respuestaLimpia = respuestaIA.content
+      .replace(/\[IMAGEN:https?:\/\/[^\]]+\]/gi, '')
+      .replace(/\[VIDEO:https?:\/\/[^\]]+\]/gi, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+
+    // Enviar imágenes del catálogo
+    for (const match of imagenesEncontradas) {
+      const url = match.replace(/\[IMAGEN:/i, '').replace(/\]$/, '')
+      console.log(`[Webhook] Enviando imagen de producto: ${url}`)
+      try {
+        await enviarImagenWhatsApp({
+          instancia: instancia.evolution_instance,
+          apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+          numero,
+          mediaUrl: url,
+          delayMs: 500,
+        })
+      } catch (e) {
+        console.error('Error enviando imagen:', e)
+      }
+    }
+
+    // Enviar videos del catálogo
+    for (const match of videosEncontrados) {
+      const url = match.replace(/\[VIDEO:/i, '').replace(/\]$/, '')
+      console.log(`[Webhook] Enviando video de producto: ${url}`)
+      try {
+        await enviarMediaWhatsApp({
+          instancia: instancia.evolution_instance,
+          apiKey: instancia.evolution_api_key || process.env.EVOLUTION_API_KEY || '',
+          numero,
+          mediaUrl: url,
+          mediaType: 'video',
+          delayMs: 500,
+        })
+      } catch (e) {
+        console.error('Error enviando video:', e)
+      }
+    }
+
     // Guardar respuesta en historial (mantener asignacion al mismo usuario)
     await query(
       `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje, usuario_id)
        VALUES ($1, $2, 'assistant', $3, $4)`,
-      [clienteId, numero, respuestaIA.content, usuarioAsignado]
+      [clienteId, numero, respuestaLimpia, usuarioAsignado]
     )
 
     // Incrementar contador de mensajes del cliente
@@ -780,6 +836,9 @@ export async function POST(request: NextRequest) {
       cita_creada: citaCreada,
       cita_modificada: citaModificada,
       cita_cancelada: citaCancelada,
+      imagenes_enviadas: imagenesEncontradas.length,
+      videos_enviados: videosEncontrados.length,
+      productos_encontrados: productosEncontrados.length,
     })
 
   } catch (error) {
