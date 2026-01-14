@@ -14,6 +14,7 @@ export async function GET() {
         ca.prompt_sistema, ca.temperatura, ca.max_tokens, ca.activo,
         ca.horario_inicio, ca.horario_fin, ca.mensaje_fuera_horario,
         ca.voice_id, ca.responder_con_audio,
+        ca.voice_stability, ca.voice_similarity, ca.voice_style,
         ta.nombre as tipo_nombre,
         ta.icono as tipo_icono,
         u.nombre as usuario_nombre
@@ -74,7 +75,11 @@ export async function PUT(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     const body = await request.json()
-    const { id, nombre_custom, prompt_sistema, temperatura, max_tokens, activo, voice_id, responder_con_audio } = body
+    const {
+      id, nombre_custom, prompt_sistema, temperatura, max_tokens, activo,
+      voice_id, responder_con_audio,
+      voice_stability, voice_similarity, voice_style
+    } = body
 
     await query(
       `UPDATE configuracion_agente SET
@@ -86,9 +91,12 @@ export async function PUT(request: NextRequest) {
         activo = COALESCE($5, activo),
         voice_id = $8,
         responder_con_audio = COALESCE($9, responder_con_audio),
+        voice_stability = COALESCE($10, voice_stability),
+        voice_similarity = COALESCE($11, voice_similarity),
+        voice_style = COALESCE($12, voice_style),
         updated_at = NOW()
        WHERE id = $6 AND cliente_id = $7`,
-      [nombre_custom, prompt_sistema, temperatura, max_tokens, activo, id, user.cliente_id, voice_id || null, responder_con_audio]
+      [nombre_custom, prompt_sistema, temperatura, max_tokens, activo, id, user.cliente_id, voice_id || null, responder_con_audio, voice_stability, voice_similarity, voice_style]
     )
 
     return NextResponse.json({ success: true })

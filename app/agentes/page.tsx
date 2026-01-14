@@ -32,6 +32,9 @@ interface Agente {
   activo: boolean
   voice_id: string | null
   responder_con_audio: boolean
+  voice_stability: number
+  voice_similarity: number
+  voice_style: number
 }
 
 interface VozElevenLabs {
@@ -81,6 +84,8 @@ export default function AgentesPage() {
   const [clonandoVoz, setClonandoVoz] = useState(false)
   const [eliminandoVoz, setEliminandoVoz] = useState<string | null>(null)
   const [mejorando, setMejorando] = useState(false)
+  const [probandoVoz, setProbandoVoz] = useState(false)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
   
   const [paso, setPaso] = useState(1)
@@ -288,6 +293,52 @@ export default function AgentesPage() {
       setMessage({ type: 'error', text: 'Error de conexión' })
     }
     setSaving(false)
+  }
+
+  // Probar voz con los parámetros actuales
+  const probarVoz = async () => {
+    if (!selectedAgente?.voice_id) {
+      setMessage({ type: 'error', text: 'Selecciona una voz primero' })
+      return
+    }
+
+    setProbandoVoz(true)
+    setAudioUrl(null)
+
+    try {
+      const res = await fetch('/api/elevenlabs/probar-voz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          voiceId: selectedAgente.voice_id,
+          stability: selectedAgente.voice_stability || 0.30,
+          similarity: selectedAgente.voice_similarity || 0.60,
+          style: selectedAgente.voice_style || 0.55,
+          texto: 'Hola, soy tu asistente virtual. ¿Cómo puedo ayudarte hoy?'
+        })
+      })
+
+      const data = await res.json()
+      if (data.success && data.audio) {
+        // Crear URL del audio para reproducir
+        const audioBlob = new Blob(
+          [Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))],
+          { type: 'audio/mpeg' }
+        )
+        const url = URL.createObjectURL(audioBlob)
+        setAudioUrl(url)
+
+        // Auto-reproducir
+        const audio = new Audio(url)
+        audio.play()
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Error al generar audio' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Error de conexión' })
+    }
+
+    setProbandoVoz(false)
   }
 
   const subirArchivo = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -733,6 +784,95 @@ export default function AgentesPage() {
                         <p className="text-xs text-[var(--text-tertiary)] mt-2">
                           Usa ElevenLabs para generar audio con voz natural. Costo aprox: $0.00003/caracter
                         </p>
+
+                        {/* Configuración de voz */}
+                        {selectedAgente.voice_id && (
+                          <div className="mt-4 p-4 bg-[var(--bg-primary)] rounded-lg border border-[var(--border-color)]">
+                            <h5 className="font-medium text-[var(--text-primary)] mb-4">Configuración de Voz</h5>
+
+                            {/* Stability */}
+                            <div className="mb-4">
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="text-[var(--text-secondary)]">Estabilidad</span>
+                                <span className="text-emerald-400">{((selectedAgente.voice_stability || 0.30) * 100).toFixed(0)}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={(selectedAgente.voice_stability || 0.30) * 100}
+                                onChange={(e) => setSelectedAgente({ ...selectedAgente, voice_stability: parseInt(e.target.value) / 100 })}
+                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                              />
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">Bajo = más expresivo | Alto = más estable</p>
+                            </div>
+
+                            {/* Similarity */}
+                            <div className="mb-4">
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="text-[var(--text-secondary)]">Similitud</span>
+                                <span className="text-emerald-400">{((selectedAgente.voice_similarity || 0.60) * 100).toFixed(0)}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={(selectedAgente.voice_similarity || 0.60) * 100}
+                                onChange={(e) => setSelectedAgente({ ...selectedAgente, voice_similarity: parseInt(e.target.value) / 100 })}
+                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                              />
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">Bajo = más variación | Alto = más fiel a la voz original</p>
+                            </div>
+
+                            {/* Style */}
+                            <div className="mb-4">
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="text-[var(--text-secondary)]">Expresividad</span>
+                                <span className="text-emerald-400">{((selectedAgente.voice_style || 0.55) * 100).toFixed(0)}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={(selectedAgente.voice_style || 0.55) * 100}
+                                onChange={(e) => setSelectedAgente({ ...selectedAgente, voice_style: parseInt(e.target.value) / 100 })}
+                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                              />
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">Bajo = neutro | Alto = más emocional</p>
+                            </div>
+
+                            {/* Botón de prueba */}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={probarVoz}
+                                disabled={probandoVoz}
+                                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                              >
+                                {probandoVoz ? (
+                                  <>
+                                    <span className="animate-spin">⏳</span>
+                                    Generando...
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>🔊</span>
+                                    Probar Voz
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {audioUrl && (
+                              <div className="mt-3">
+                                <audio controls src={audioUrl} className="w-full h-10" />
+                              </div>
+                            )}
+
+                            <p className="text-xs text-[var(--text-tertiary)] mt-3 text-center">
+                              Ajusta los valores y prueba hasta encontrar el tono ideal
+                            </p>
+                          </div>
+                        )}
 
                         {/* Voces clonadas existentes */}
                         {voces.filter(v => v.labels?.language === 'cloned' || v.name.includes('(')).length > 0 && (

@@ -419,6 +419,79 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ============================================
+    // AGRUPACIÓN DE MENSAJES RÁPIDOS
+    // Si el cliente envía varios mensajes seguidos (en menos de 10 seg),
+    // los agrupamos para responder una sola vez
+    // ============================================
+    const TIEMPO_ESPERA_SEGUNDOS = 10 // Esperar 10 segundos desde el PRIMER mensaje
+
+    // Verificar si hay mensajes en el buffer para este número
+    const mensajesBuffer = await query(
+      `SELECT id, mensaje, created_at FROM buffer_mensajes
+       WHERE cliente_id = $1 AND numero_whatsapp = $2
+       ORDER BY created_at ASC`,
+      [clienteId, numero]
+    )
+
+    if (mensajesBuffer.length > 0) {
+      // Ya hay mensajes en el buffer
+      const primerMensaje = mensajesBuffer[0]
+      const tiempoDesdePrimero = Date.now() - new Date(primerMensaje.created_at).getTime()
+
+      if (tiempoDesdePrimero < TIEMPO_ESPERA_SEGUNDOS * 1000) {
+        // Aún no ha pasado el tiempo de espera, agregar al buffer y salir
+        await execute(
+          `INSERT INTO buffer_mensajes (cliente_id, numero_whatsapp, instancia, mensaje, tipo)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [clienteId, numero, instance, texto, tipo]
+        )
+        console.log(`[Buffer] Mensaje #${mensajesBuffer.length + 1} agregado para ${numero}, esperando...`)
+        return NextResponse.json({ status: 'buffered', count: mensajesBuffer.length + 1 })
+      }
+
+      // Ya pasó el tiempo de espera, procesar todos los mensajes
+      const todosLosMensajes = [...mensajesBuffer.map((m: any) => m.mensaje), texto]
+      texto = todosLosMensajes.join('\n\n')
+      console.log(`[Buffer] Procesando ${todosLosMensajes.length} mensajes combinados de ${numero}`)
+
+      // Limpiar el buffer
+      await execute(
+        `DELETE FROM buffer_mensajes WHERE cliente_id = $1 AND numero_whatsapp = $2`,
+        [clienteId, numero]
+      )
+    } else {
+      // No hay buffer, guardar este mensaje y esperar un poco
+      await execute(
+        `INSERT INTO buffer_mensajes (cliente_id, numero_whatsapp, instancia, mensaje, tipo)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [clienteId, numero, instance, texto, tipo]
+      )
+
+      // Esperar el tiempo configurado para dar oportunidad a más mensajes
+      console.log(`[Buffer] Primer mensaje de ${numero}, esperando ${TIEMPO_ESPERA_SEGUNDOS}s...`)
+      await new Promise(resolve => setTimeout(resolve, TIEMPO_ESPERA_SEGUNDOS * 1000))
+
+      // Después de esperar, obtener todos los mensajes del buffer
+      const mensajesFinales = await query(
+        `SELECT mensaje FROM buffer_mensajes
+         WHERE cliente_id = $1 AND numero_whatsapp = $2
+         ORDER BY created_at ASC`,
+        [clienteId, numero]
+      )
+
+      if (mensajesFinales.length > 1) {
+        texto = mensajesFinales.map((m: any) => m.mensaje).join('\n\n')
+        console.log(`[Buffer] Combinados ${mensajesFinales.length} mensajes de ${numero}`)
+      }
+
+      // Limpiar el buffer
+      await execute(
+        `DELETE FROM buffer_mensajes WHERE cliente_id = $1 AND numero_whatsapp = $2`,
+        [clienteId, numero]
+      )
+    }
+
     // Buscar el ultimo usuario que respondio a este numero (para asignar la conversacion)
     const ultimoUsuario = await queryOne(
       `SELECT usuario_id FROM historial_conversaciones
@@ -428,7 +501,7 @@ export async function POST(request: NextRequest) {
     )
     const usuarioAsignado = ultimoUsuario?.usuario_id || null
 
-    // Guardar mensaje entrante en historial (asignado al usuario que respondio previamente)
+    // Guardar mensaje entrante en historial (todos los mensajes combinados)
     await query(
       `INSERT INTO historial_conversaciones (cliente_id, numero_whatsapp, rol, mensaje, usuario_id)
        VALUES ($1, $2, 'user', $3, $4)`,
@@ -562,6 +635,19 @@ export async function POST(request: NextRequest) {
                        process.env.ELEVENLABS_API_KEY &&
                        mensajeEntranteEsAudio
 
+    // Calcular contexto de conversación
+    const fechaHora = new Date()
+    const horaNum = fechaHora.getHours()
+    const momentoDelDia = horaNum >= 5 && horaNum < 12 ? 'mañana' : horaNum >= 12 && horaNum < 19 ? 'tarde' : 'noche'
+    const horaFormateada = fechaHora.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })
+    const esNuevaConversacion = historial.length === 0
+
+    // Obtener nombre del cliente del lead si existe
+    let nombreCliente: string | undefined
+    if (lead?.nombre && !lead.nombre.startsWith('WhatsApp')) {
+      nombreCliente = lead.nombre
+    }
+
     // Construir mensajes para la IA (incluir instrucciones de citas con info del cliente)
     const promptBase = agente.prompt_sistema + getPromptCitas(citasDelCliente)
     const promptSistema = construirPromptConRAG(
@@ -576,7 +662,13 @@ export async function POST(request: NextRequest) {
         // Activar modo audio para respuestas más cortas y limpias
         modoAudio: usaraAudio,
         // Incluir productos encontrados del catálogo
-        productos: productosEncontrados
+        productos: productosEncontrados,
+        // Contexto de conversación para respuestas más naturales
+        esNuevaConversacion,
+        nombreCliente,
+        horaActual: horaFormateada,
+        momentoDelDia: momentoDelDia as 'mañana' | 'tarde' | 'noche',
+        mensajesEnHistorial: historial.length
       }
     )
 
